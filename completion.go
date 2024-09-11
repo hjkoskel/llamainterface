@@ -44,6 +44,11 @@ type GenerationSettings struct { //JSON copupaste
 	TypicalP        float64         `json:"typical_p"`
 }
 
+// OnlyPrompt is used for escaping json
+type OnlyPrompt struct {
+	Prompt string `json:"prompt"`
+}
+
 /*
 system_prompt
  - prompt
@@ -52,9 +57,9 @@ system_prompt
 */
 
 type QueryCompletion struct {
-	Prompt string //: Provide the prompt for this completion as a string or as an array of strings or numbers representing tokens. Internally, the prompt is compared to the previous completion and only the "unseen" suffix is evaluated. If the prompt is a string or an array with the first element given as a string, a bos token is inserted in the front like main does.
-
-	Temperature float64 //: Adjust the randomness of the generated text (default: 0.8).
+	Prompt       string //: Provide the prompt for this completion as a string or as an array of strings or numbers representing tokens. Internally, the prompt is compared to the previous completion and only the "unseen" suffix is evaluated. If the prompt is a string or an array with the first element given as a string, a bos token is inserted in the front like main does.
+	PromptTokens []int
+	Temperature  float64 //: Adjust the randomness of the generated text (default: 0.8).
 
 	Top_k     float64 //Limit the next token selection to the K most probable tokens (default: 40).
 	Top_p     float64 //Limit the next token selection to a subset of tokens with a cumulative probability above a threshold P (default: 0.95).
@@ -218,7 +223,24 @@ func (p *QueryCompletion) MarshalJSON() ([]byte, error) {
 	//sb.WriteString("{\n")
 	d := DefaultQueryCompletion()
 
-	parts = append(parts, fmt.Sprintf("\"prompt\":\"%s\"", p.Prompt))
+	if len(p.PromptTokens) == 0 {
+
+		byt, errMarsh := json.Marshal(OnlyPrompt{Prompt: p.Prompt})
+		if errMarsh != nil {
+			return nil, fmt.Errorf("error marshaling prompt text %s", errMarsh)
+		}
+		s := string(byt)
+
+		parts = append(parts, s[1:len(s)-1])
+		//parts = append(parts, fmt.Sprintf("\"prompt\":\"%s\"", p.Prompt))
+	} else {
+		s := fmt.Sprintf("%#v", p.PromptTokens)
+		s = strings.Replace(s, "[]int{", "", 1)
+		s = strings.Replace(s, "}", "", 1)
+
+		parts = append(parts, fmt.Sprintf("\"prompt\":[%s]", s)) //TODO WHY NOT WORKING?
+
+	}
 
 	if d.Temperature != p.Temperature {
 		parts = append(parts, fmt.Sprintf("\"temperature\":%.3f", p.Temperature))
@@ -373,6 +395,8 @@ func (p *LLamaServer) PostCompletion(q QueryCompletion, updates chan CompletionR
 
 	rowFeed := make(chan string, 100)
 
+	fmt.Printf("query is %s\n\n", queryRaw)
+
 	final, errPost := p.PostQuery("/completion", queryRaw, rowFeed, timeout)
 	if errPost != nil {
 		if updates != nil {
@@ -382,7 +406,7 @@ func (p *LLamaServer) PostCompletion(q QueryCompletion, updates chan CompletionR
 	}
 	completed := CompletionResult{}
 
-	fmt.Printf("\n\nFINAL IS %s\n\n", final)
+	//fmt.Printf("\n\nFINAL IS %s\n\n", final)
 
 	go func() {
 		d := CompletionResult{}
