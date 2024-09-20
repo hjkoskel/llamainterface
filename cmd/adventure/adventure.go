@@ -21,11 +21,26 @@ import (
 	"github.com/hjkoskel/bindstablediff"
 )
 
+var promptFormatter PromptFormatter //Common formatter... TODO make switchable if using other models
+
 const (
 	LLAMAFILENAME = "/home/henri/Downloads/Meta-Llama-3-8B-Instruct.Q5_K_M.llamafile"
 )
 
 const (
+	MAINTITLESCREENGRAPHICPROMPT = "movie poster with different kind of themes and heroes. Fantasy characters, astronauts, superheros, cowboys, ghosts, robots, dogs,grim reaper, cthulhu, star trek vulcan. Picture have large title text ADVENTURE"
+	TITLEPICTUREFILE             = "title.png"
+	MAINMENUGRAPHICPROMPT        = "ADVENTURE game main menu with option A:New Game B:Branch C:Continue Q:Quit"
+	MENUPICTUREFILE              = "menu.png"
+)
+
+const (
+	PLAYER        = "player"
+	DUNGEONMASTER = "dungeonmaster"
+)
+
+const (
+	GAMESDIR            = "./games/"
 	SAVEGAMEDIR         = "./savegames/"
 	LATESTDUNGEONAMSTER = "latestDungeonMaster.txt"
 )
@@ -44,6 +59,7 @@ type PromptEntry struct {
 	Type               PromptType
 	PictureDescription string
 	PictureFileName    string
+	Timestamp          time.Time //Nice to have information
 }
 
 func (p *PromptEntry) ToMarkdown() string {
@@ -51,9 +67,11 @@ func (p *PromptEntry) ToMarkdown() string {
 	case PROMPTTYPE_SYS:
 		return fmt.Sprintf("# System prompt\n%s", p.Text)
 	case PROMPTTYPE_PLAYER:
-		s := strings.ReplaceAll(p.Text, "<|start_header_id|>player<|end_header_id|>", "")
+		s := promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, p.Text)
+		/*s := strings.ReplaceAll(p.Text, "<|start_header_id|>player<|end_header_id|>", "")
 		s = strings.ReplaceAll(s, "<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>", "")
-		s = strings.TrimSpace(s)
+		s = strings.TrimSpace(s)*/
+
 		return fmt.Sprintf("\n~~~\n%s\n~~~\n", s)
 	case PROMPTTYPE_DM:
 		return fmt.Sprintf("![%s](%s)", strings.TrimSpace(strings.ReplaceAll(p.PictureDescription, "\n", " ")), path.Base(p.PictureFileName)) + "\n" + p.Text + "\n"
@@ -61,13 +79,10 @@ func (p *PromptEntry) ToMarkdown() string {
 	return p.Text
 }
 
-type GameArtistSettings struct {
-	BaseText string
-}
-
 type AdventureGame struct {
-	llama       llamainterface.LLamaServer
-	Introprompt string
+	TitleGraphicPrompt string
+	llama              llamainterface.LLamaServer
+	Introprompt        string
 
 	MaxTokens int
 
@@ -84,8 +99,9 @@ func (p *AdventureGame) WriteBlankFile(fname string) error {
 	ref := AdventureGame{
 		Introprompt: p.Introprompt,
 		MaxTokens:   p.MaxTokens,
-		Artist:      GameArtistSettings{BaseText: p.Artist.BaseText},
-		GameName:    p.GameName,
+		//Artist:      GameArtistSettings{BaseText: p.Artist.BaseText},
+		Artist:   p.Artist,
+		GameName: p.GameName,
 	}
 	byt, errMarshal := json.MarshalIndent(ref, "", " ")
 	if errMarshal != nil {
@@ -188,20 +204,20 @@ func (p *AdventureGame) CheckOutputChanges() (bool, error) {
 }
 
 // loadAdventure Continues existing adventure
-func loadAdventure(loadGameFile string, llama llamainterface.LLamaServer) (AdventureGame, error) {
+func loadAdventure(loadGameFile string) (AdventureGame, error) {
 	byt, readErr := os.ReadFile(loadGameFile)
 	if readErr != nil {
 		return AdventureGame{}, fmt.Errorf("error reading savegame %s  err:%s", loadGameFile, readErr)
 	}
 	var result AdventureGame
 	errParse := json.Unmarshal(byt, &result)
-	result.llama = llama
 	if result.StartTime.Unix() < 1000 {
 		result.StartTime = time.Now()
 	}
 	return result, errParse
 }
 
+/*
 func initAdventure(gameName string, llama llamainterface.LLamaServer, systemprompt string, maxTokens int) (AdventureGame, error) {
 	query := llamainterface.DefaultQueryCompletion()
 	query.Prompt = fmt.Sprintf("<|start_header_id|>system<|end_header_id|>\n\n%s<|eot_id|>", systemprompt)
@@ -211,9 +227,6 @@ func initAdventure(gameName string, llama llamainterface.LLamaServer, systemprom
 		return AdventureGame{}, fmt.Errorf("system prompt tokenization error %s", errTokenize)
 	}
 
-	//gameNameAndTime := fmt.Sprintf("%s%d", gameName, time.Now().Unix())
-	//os.MkdirAll(path.Join(SAVEGAMEDIR, gameNameAndTime), 0777)
-
 	return AdventureGame{
 		GameName:      gameName,
 		StartTime:     time.Now(),
@@ -222,6 +235,7 @@ func initAdventure(gameName string, llama llamainterface.LLamaServer, systemprom
 		Introprompt:   query.Prompt,
 		MaxTokens:     maxTokens}, nil
 }
+*/
 
 func (p *AdventureGame) GetSaveDir() string {
 	return path.Join(SAVEGAMEDIR, fmt.Sprintf("%s%d", p.GameName, p.StartTime.Unix()))
@@ -250,14 +264,15 @@ func (p *AdventureGame) tokenizePrompt(prompt string) (PromptEntry, error) {
 }
 
 // Write to disk? return filename?
-func (p *AdventureGame) GeneratePicture(longText string) (string, string, error) {
+func (p *AdventureGame) GeneratePicture(temperature float64, longText string) (string, string, error) {
 	os.Mkdir(p.GetSaveDir(), 0777)
 	outputPngName := path.Join(p.GetSaveDir(), fmt.Sprintf("out%d.png", time.Now().Unix()))
 
 	query := gameBasicQuery()
+	query.Temperature = temperature
 	query.Prompt = artist.ArtPromptText(longText)
 
-	fmt.Printf("\n----ART PROMPT----\n%s\n----------\n", query.Prompt)
+	color.Cyan("\n----ART PROMPT----\n%s\n----------\n", query.Prompt)
 
 	respText, errQuery := p.RunQuery(query) //----------RUN HERE!!!!!!!!!!!
 	if errQuery != nil {
@@ -279,10 +294,18 @@ func (p *AdventureGame) GeneratePicture(longText string) (string, string, error)
 	return respText, outputPngName, errSave
 }
 
-func (p *AdventureGame) UserInteraction(input string) (string, error) {
-	query := gameBasicQuery()
+func (p *AdventureGame) LastTime() time.Time {
+	if len(p.PromptEntries) == 0 {
+		return p.StartTime
+	}
+	return p.PromptEntries[len(p.PromptEntries)-1].Timestamp
+}
 
-	newPromptText := fmt.Sprintf("\n<|start_header_id|>player<|end_header_id|>\n\n%s<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>", input)
+func (p *AdventureGame) UserInteraction(temperature float64, input string) (string, error) {
+	query := gameBasicQuery()
+	query.Temperature = temperature
+	//newPromptText := fmt.Sprintf("\n<|start_header_id|>player<|end_header_id|>\n\n%s<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>", input)
+	newPromptText := promptFormatter.Format("", nil, PLAYER, DUNGEONMASTER, input)
 
 	/*query.Prompt = fmt.Sprintf("%s\n<|start_header_id|>player<|end_header_id|>%s<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>",
 	p.GetTotalPrompt(), input)*/
@@ -304,15 +327,20 @@ func (p *AdventureGame) UserInteraction(input string) (string, error) {
 	if errQuery != nil {
 		return respText, errQuery
 	}
+	respText = promptFormatter.AppendStopIfNeeded(respText)
+
+	color.Magenta(fmt.Sprintf("PROMPT RESPONSE IS %s\n", respText))
 
 	newToken, errNewToken = p.tokenizePrompt(respText)
 	if errNewToken != nil {
 		return "", errNewToken
 	}
 	newToken.Type = PROMPTTYPE_DM
+	newToken.Timestamp = time.Now()
 	p.PromptEntries = append(p.PromptEntries, newToken)
 
-	return strings.Replace(respText, "<|eot_id|>", "", -1), nil
+	return promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, respText), nil
+	//return strings.Replace(respText, "<|eot_id|>", "", -1), nil
 }
 
 func gameBasicQuery() llamainterface.QueryCompletion {
@@ -321,7 +349,7 @@ func gameBasicQuery() llamainterface.QueryCompletion {
 	query.Stream = false
 	query.N_predict = 1024
 	query.Temperature = 0.7
-	query.Stop = []string{"<|eot_id|>"}
+	query.Stop = promptFormatter.QueryStop() //[]string{"<|eot_id|>"}
 	//query.Stop = []string{"</s>", "dungeonmaster:", "player:"}
 	query.Repeat_last_n = 256
 	query.Repeat_penalty = 1.18
@@ -347,6 +375,10 @@ func main() {
 	pLoadFile := flag.String("load", "", "load existing game from json and continue")
 	pBrancToNewGame := flag.Bool("b", false, "branch new game from loadfile")
 
+	//Some simple settings
+	pTempTextPrompt := flag.Float64("tp", 0.7, "temperature of text prompt")
+	pTempImageTextPrompt := flag.Float64("tip", 0.7, "temperature of imagePrompt prompt")
+
 	//TODO start from json  with -load at all times. These were just for bootstrapping
 	//pGameFile := flag.String("f", "firetopadventure.txt", "uses this file as system prompt. This is what you want to play")
 	//pArtistBaseTextFile := flag.String("ab", "promptArtist.txt", "prompt for generating image prompts from dungeon master text")
@@ -364,8 +396,9 @@ func main() {
 
 	//For generating new adventures
 	pCreateBlank := flag.String("blank", "", "Create blank game file as example from this for creating new adventure games")
-
 	flag.Parse()
+
+	promptFormatter = Llama31Formatter{} //TODO choose and support other formats
 
 	var imGen ImageGenerator
 	if 0 < len(*pFluxHost) {
@@ -383,6 +416,39 @@ func main() {
 			return
 		}
 	}
+
+	/**** Check is there title picture for menu *****/
+	//fmt.Sprintf("%s [%s]", game.GameName, game.StartTime)
+	ui, uiErr := InitGraphicalUI("ADVENTURE")
+	if uiErr != nil {
+		fmt.Printf("UI init err %s\n", uiErr)
+		return
+	}
+
+	ui.SetGenerating("Starting adventure: generate title picture, wait...")
+	//ui.Render()
+
+	errCreateTitle := CreatePngIfNotFound(imGen, TITLEPICTUREFILE, MAINTITLESCREENGRAPHICPROMPT)
+	if errCreateTitle != nil {
+		fmt.Printf("\nerror while creating title picture %s\n", errCreateTitle)
+		return
+	}
+
+	errImg := ui.SplashScreen(TITLEPICTUREFILE)
+	if errImg != nil {
+		fmt.Printf("Failed loading title...%s re-trying generate title\n\n", errImg)
+		return
+	}
+	ui.Render()
+	//Generate menu
+	errCreateMenu := CreatePngIfNotFound(imGen, MENUPICTUREFILE, MAINMENUGRAPHICPROMPT)
+	if errCreateMenu != nil {
+		fmt.Printf("error creating menu pictur file %s\n", errCreateMenu)
+	}
+
+	ui.SetGenerating("Press anykey")
+	ui.Render()
+	//ui.WaitPressAnykey()
 
 	ctxLllama, _ := context.WithCancel(context.Background())
 
@@ -429,41 +495,58 @@ func main() {
 	}
 
 	var game AdventureGame
+	loadingOldGame := false
 	if len(*pLoadFile) == 0 { //Start new?
-		fmt.Printf("Please load with -load blank or saved adventure")
-		return
-		/*
-			fmt.Printf("\n--- Starting new game ---\n\n")
-			//"You are dungeonmaster who describes scene where player character is at the moment. Player asks details about surroundings and dungeonmaster reports those. Also dungeon master tells what happens when player wants to do specific thing. Player approaches firetop mountain and sees entrance of maze at side of hill of mountain"
-			gameFileText, errGameFile := os.ReadFile(*pGameFile)
-			if errGameFile != nil {
-				fmt.Printf("error reading game file %s err %s\n", *pGameFile, errGameFile)
-				return
-			}
+		//Lets show main menu
+		menuSel, errMenuSel := ui.RunMainMenu()
+		if errMenuSel != nil {
+			fmt.Printf("menu selection fail %s\n", errMenuSel)
+			return
+		}
+		fmt.Printf("\n\nMENU SELECTION %s\n", menuSel)
 
-			artistBaseText, errArtistBaseText := os.ReadFile(*pArtistBaseTextFile)
-			if errArtistBaseText != nil {
-				fmt.Printf("Error reading artist prompt file %s err:%s\n", *pArtistBaseTextFile, errArtistBaseText)
-				return
-			}
+		var cat GameCatalogue
+		var catErr error
+		switch menuSel {
+		case MAINMENUSELECT_NEWGAME:
+			cat, catErr = ListNewGames(GAMESDIR)
+		case MAINMENUSELECT_CONTINUE, MAINMENUSELECT_BRANCHOLD:
+			loadingOldGame = true
+			cat, catErr = ListSavedGames(SAVEGAMEDIR)
+		}
+		if catErr != nil {
+			fmt.Printf("error catalogueing %s\n", catErr)
+			return
+		}
 
-			var errGameInit error
-			game, errGameInit = initAdventure(
-				"firetopadventure",
-				llama,
-				string(gameFileText),
-				*pMaxTokens)
-			game.Artist.BaseText = string(artistBaseText)
-
-			if errGameInit != nil {
-				fmt.Printf("err game init %s\n", errGameInit)
-				return
+		index := 0
+		for gamename, catItem := range cat {
+			index++
+			ui.generatingText = fmt.Sprintf("Generating start image %v/%v : %s", index, len(cat), catItem.Game.GameName)
+			ui.Render()
+			errPrepare := catItem.PrepareImage(imGen)
+			if errPrepare != nil {
+				fmt.Printf("failed preparing %s\n", errPrepare)
 			}
-		*/
+			cat[gamename] = catItem
+		}
+		pickResult, errPick := ui.PickFromCatalogue(cat)
+		if errPick != nil {
+			fmt.Printf("error picking %s\n", errPick)
+			return
+		}
+		fmt.Printf("Picked %#v\n", pickResult.Game.GameName)
+		game = pickResult.Game
+
+		if menuSel == MAINMENUSELECT_BRANCHOLD {
+			game.StartTime = time.UnixMilli(0)
+		}
+
 	} else {
+		loadingOldGame = true
 		fmt.Printf("\n--- Loading:%s ---\n\n", *pLoadFile)
 		var errGameInit error
-		game, errGameInit = loadAdventure(*pLoadFile, llama)
+		game, errGameInit = loadAdventure(*pLoadFile)
 		if errGameInit != nil {
 			fmt.Printf("err game load from %s err:%s\n", *pLoadFile, errGameInit)
 			return
@@ -472,6 +555,7 @@ func main() {
 			game.StartTime = time.UnixMilli(0)
 		}
 	}
+	game.llama = llama
 
 	if 0 < len(*pCreateBlank) {
 		errWriteBlank := game.WriteBlankFile(*pCreateBlank)
@@ -485,7 +569,9 @@ func main() {
 
 	if len(game.PromptEntries) == 0 { //NEED TO INITIALIZE.  TODO PUT INTO LOAD METHOD!
 		query := llamainterface.DefaultQueryCompletion()
-		query.Prompt = fmt.Sprintf("<|start_header_id|>system<|end_header_id|>\n\n%s<|eot_id|>", game.Introprompt)
+		//query.Prompt = fmt.Sprintf("<|start_header_id|>system<|end_header_id|>\n\n%s<|eot_id|>", game.Introprompt)
+
+		query.Prompt = promptFormatter.Format(game.Introprompt, nil, PLAYER, DUNGEONMASTER, "")
 
 		tokens, errTokenize := llama.PostTokenize(query.Prompt, time.Minute*5)
 		if errTokenize != nil {
@@ -495,14 +581,10 @@ func main() {
 		game.PromptEntries = []PromptEntry{PromptEntry{Text: query.Prompt, Tokens: tokens}}
 	}
 
-	ui, uiErr := InitGraphicalUI(fmt.Sprintf("%s [%s]", game.GameName, game.StartTime))
-	if uiErr != nil {
-		fmt.Printf("UI init err %s\n", uiErr)
-		return
-	}
 	ui.SetGenerating("Starting up, wait....")
+	ui.Render()
 	var artistInitErr error
-	artist, artistInitErr = InitArtist(*pDiffusionModelFile, game.Artist.BaseText, "", "", imGen)
+	artist, artistInitErr = InitArtist(*pDiffusionModelFile, game.Artist, promptFormatter, imGen)
 	if artistInitErr != nil {
 		fmt.Printf("error initializing artist %s\n", artistInitErr)
 		return
@@ -511,20 +593,18 @@ func main() {
 	//Simple read input
 	var errUser error
 	userInput := "introduce game" //Starting query, not printing on ui, part of system prompt getting started
-	if 0 < len(*pLoadFile) {
+
+	if loadingOldGame {
 		last := game.PromptEntries[len(game.PromptEntries)-1]
 		if last.Type == PROMPTTYPE_DM {
 			userInput = "" //Nope... loaded game wait input
 		}
 		//get pic and latest text
-		ui.SetDungeonMasterText(last.Text)
-		ui.SetImagePromptText(last.PictureDescription)
-		//latestPic, errLatestPic := LoadPng(last.PictureFileName)
-		//if errLatestPic != nil {
-		//	fmt.Printf("not possible to load pic %s  err:%s now just text\n", last.PictureFileName, errLatestPic)
-		//} else {
-		//	ui.SetPicture(lat
-		//}
+		txt := promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, last.Text)
+		fmt.Printf("\n\nEXTRACTED TEXT IS\n%s\n\n", txt)
+
+		ui.SetDungeonMasterText(txt)
+		ui.SetImagePromptText(last.PictureDescription) //Just set for debug?
 		ui.SetPicture(last.PictureFileName)
 	}
 
@@ -534,7 +614,7 @@ func main() {
 			ui.SetGenerating("Running LLM....")
 			ui.Render()
 
-			dungeonMastersays, errRun := game.UserInteraction(userInput)
+			dungeonMastersays, errRun := game.UserInteraction(*pTempTextPrompt, userInput)
 			if errRun != nil {
 				fmt.Printf("ERROR: Failed running game %s\n", errRun)
 				break
@@ -551,7 +631,7 @@ func main() {
 
 			ui.SetGenerating("Generating picture...")
 			ui.Render()
-			picDescription, picFileName, errPic := game.GeneratePicture(dungeonMastersays)
+			picDescription, picFileName, errPic := game.GeneratePicture(*pTempImageTextPrompt, dungeonMastersays)
 			if errPic != nil {
 				fmt.Printf("\n\nERROR generating picture:%s\n", errPic)
 				return

@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	_ "embed"
 	"fmt"
 	"image"
 	"image/png"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/hjkoskel/bindstablediff"
 )
 
@@ -43,6 +43,18 @@ func SavePng(fname string, img image.Image) error {
 		return fmt.Errorf("error writing %s failed err=%v", fname, err)
 	}
 	return nil
+}
+
+func CreatePngIfNotFound(gen ImageGenerator, fname string, prompt string) error {
+	tex := rl.LoadTexture(fname)
+	if tex.Width != 0 || tex.Height != 0 {
+		return nil //ok...
+	}
+	img, imgErr := gen.CreatePic(prompt)
+	if imgErr != nil {
+		return fmt.Errorf("img generation error %s", imgErr)
+	}
+	return SavePng(fname, img)
 }
 
 type ImageGenerator interface {
@@ -120,64 +132,35 @@ func InitFluxImageGen(host string, port int) (ImageGenerator, error) { //TODO in
 	return ImageGenerator(g), nil
 }
 
-/*
-go:embed promptArtist.txt
-var baseTextPromptArtist string
-*/
-
 type Artist struct {
-	BaseText string
-	//model    bindstablediff.StableDiffusionModel
-	Prefix string //Possible to modify image generation prompt by some fixed part of prompt. Like style stays same thru whole game
-	Suffix string
+	Formatter PromptFormatter
+	Settings  GameArtistSettings
 
 	Gen ImageGenerator
 	//Pars bindstablediff.TextGenPars
 }
 
-func InitArtist(diffusionModelFile string, baseText string, prefix string, suffix string, gen ImageGenerator) (Artist, error) {
+type GameArtistSettings struct {
+	SystemPrompt string
+	Examples     []PromptExample
+	//Add some stuff to prompt
+	Prefix string
+	Suffix string
+}
+
+func InitArtist(diffusionModelFile string, artSetting GameArtistSettings, formatter PromptFormatter, gen ImageGenerator) (Artist, error) {
 	return Artist{
-		BaseText: baseText,
-		Prefix:   prefix,
-		Suffix:   suffix,
-		Gen:      gen,
-	}, nil
+		Settings:  artSetting,
+		Gen:       gen,
+		Formatter: formatter}, nil
 }
-
-/*
-func InitArtist(diffusionModelFile string, prefix string, suffix string, steps int, nThreads int, schedule bindstablediff.EnumSchedule) (Artist, error) {
-	result := Artist{
-		BaseText: baseTextPromptArtist,
-		Prefix:   prefix,
-		Suffix:   suffix,
-		Pars: bindstablediff.TextGenPars{
-			Prompt:         "", //Set
-			NegativePrompt: "",
-			CfgScale:       7,
-			Width:          512,
-			Height:         512,
-			SampleMethod:   bindstablediff.EULER,
-			SampleSteps:    steps,
-			Seed:           -1},
-	}
-	var errInit error
-
-	result.model, errInit = bindstablediff.InitStableDiffusion(diffusionModelFile, nThreads, schedule)
-	if errInit != nil {
-		return result, fmt.Errorf("error initialized %v\n", errInit)
-	}
-	return result, nil
-}
-*/
 
 func (p *Artist) ArtPromptText(longtext string) string {
-	return strings.TrimSpace(p.BaseText) + "\n\n" + longtext + "<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>"
+	return p.Formatter.Format(p.Settings.SystemPrompt,
+		p.Settings.Examples,
+		PLAYER, DUNGEONMASTER, longtext)
 }
 
 func (p *Artist) CreatePic(prompt string) (image.Image, error) {
-	return p.Gen.CreatePic(prompt)
-	/*
-		p.Pars.Prompt = prompt
-		return p.model.Txt2Img(p.Pars)
-	*/
+	return p.Gen.CreatePic(strings.TrimSpace(p.Settings.Prefix + " " + strings.TrimSpace(prompt) + " " + p.Settings.Suffix))
 }

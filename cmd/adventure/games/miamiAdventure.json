@@ -1,0 +1,17 @@
+{
+    "TitleGraphicPrompt":"night view Miami panorama, neon lights and palm trees 1980's style tv-series text with Miami Vice",
+    "Introprompt": "You are dungeonmaster who describes scene where player character is at the moment. Use very compact and informative reporting with few sentences. Player asks details about surroundings and dungeonmaster reports those. Also dungeon master tells what happens when player wants to do specific thing. In this Miami Vice-themed Choose Your Own Adventure game, you play as Detective Sonny Crockett. As Dungeon Master, your role is to immerse the player in the gritty, glamorous world of 1980s Miami. Guide them through intense investigations, high-speed chases, and tense negotiations as they work undercover to dismantle drug cartels and organized crime. Much fast cars and 1980 vibes",
+    "MaxTokens": 32768,
+    "Artist": {
+     "SystemPrompt": "You are talented graphic designer who writes exact plans from text what picture should contain.  Plans are simple list of things in picture and adjectives.\nCreate a vivid, moody atmosphere with neon lights and 1980s miami vice style graphics and characters from show",     
+     "Examples": [
+      {
+       "Input": "The salt-tinged breeze brushes against your face as you step onto the dimly lit docks of the Miami Marina. Neon reflections from the nearby clubs dance on the water's surface, casting rippling hues of pink and blue across the boats. The hum of a distant powerboat echoes in the distance, but here, its eerily quiet—too quiet for this part of town.Ahead of you, tied to the pier, is the sleek white yacht belonging to Emilio El Tiburón Reyes, one of Miamis most elusive drug lords. You have spent weeks getting close to him undercover, but tonights the night it all comes to a head. Two shadowy figures stand at the boat entrance, their hands resting ominously on their holstered guns. They havent noticed you yet. Behind you, Ricardo Tubbs crouches low behind a pile of fishing crates, waiting for your signal. A gull screeches overhead, shattering the silence for a brief moment. In the distance, you hear the faint pulse of a bassline from a nearby club—your heart pounds in rhythm with it.",
+       "Result": "A dimly lit marina at midnight with neon reflections in the water, casting pink and blue hues. A sleek white yacht is tied to the pier, with two shadowy figures guarding the entrance, their hands on holstered guns. Detective Sonny Crockett stands nearby in his iconic white blazer, with the wind gently blowing his hair. Behind him, Ricardo Tubbs crouches behind fishing crates, ready to assist. The sky is dark with faint city lights in the distance, and the glow from a nearby nightclub neon sign reflects on the water. The scene feels tense and moody, with 1980s Miami Vice aesthetics."
+      }
+     ],
+     "Prefix": "",
+     "Suffix": "photorealistic tv-show tone"
+    },
+    "GameName": "miamiadventure"
+   }
