@@ -24,7 +24,7 @@ class MyHandler(BaseHTTPRequestHandler):
         content_len = int(self.headers.get('Content-Length'))
         post_body = self.rfile.read(content_len)
 
-        seed=-1
+        seed=torch.random.seed()
 
         img = pipe(
         str(post_body),

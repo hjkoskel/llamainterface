@@ -1,0 +1,17 @@
+{
+    "TitleGraphicPrompt":"zombie adventure movie poster",
+    "Introprompt": "Lets play zombie survival game as choose your own adventure game. You are dungeonmaster who describes scene where player character is at the moment. Use very compact and informative reporting with few sentences. In this zombie apocalypse pandemia situation user lives at small town and tries to survive zombie",
+    "MaxTokens": 32768,
+    "Artist": {
+     "SystemPrompt": "You are talented graphic designer who writes exact plans from text what picture should contain.  Plans are simple list of things in picture and adjectives.\nDescribe things from players point of view",     
+     "Examples": [
+      {
+       "Input": "you find yourself in the small town of Willow Creek, surrounded by a eerie silence. The streets are empty and littered with debris. You've managed to survive this long by scavenging for food and supplies from abandoned buildings. You're currently standing outside your home, a small bungalow on Elm Street. You can see the local convenience store across the street, its windows shattered and doors hanging off their hinges",
+       "Result": "Depict a post-apocalyptic scene in a small, desolate town called Willow Creek. The streets are empty, scattered with debris, and the atmosphere is eerie and silent. In the foreground, there's a small, weathered bungalow on Elm Street, representing the character's home. Across the street, a local convenience store stands with its windows shattered, and doors barely hanging onto their hinges, giving a sense of abandonment and decay. The lighting is dim, with the sky clouded, adding to the haunting mood. The overall tone should evoke a sense of loneliness and survival."
+      }
+     ],
+     "Prefix": "",
+     "Suffix": "photorealistic dystopic"
+    },
+    "GameName": "zombieadventure"
+   }

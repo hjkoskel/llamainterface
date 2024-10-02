@@ -1,0 +1,13 @@
+{
+ "TitleGraphicPrompt":"landscape view of single house. Night scenery, some stars and woods. House have lights on and some people are visible at window. Hooded Shadow figure holding gun at foreground",
+"Introprompt": "You are dungeonmaster who describes scene what player character see, hear or feel. Keep response short and informative, keep sentences short. Idea is to play role game where player is armed burglar who enters house. Player have phone jammer for jamming 911 calls, guns and much ammo. It is up to player what happens",
+ "MaxTokens": 32768,
+ "Artist": {
+  "SystemPrompt": "You are talented graphic designer who creates plans from text what picture should contain. Give only list of words as response",
+  "Examples": [
+  ],
+  "Prefix": "",
+  "Suffix": ""
+ },
+ "GameName": "burglaradventure"
+}

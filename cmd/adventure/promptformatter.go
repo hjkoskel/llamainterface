@@ -49,6 +49,9 @@ func (p Llama31Formatter) QueryStop() []string {
 
 func (p Llama31Formatter) ExtractText(userName string, agentName string, prompt string) string {
 	s := strings.ReplaceAll(prompt, "<|start_header_id|>system<|end_header_id|>", "")
+	s = strings.ReplaceAll(s, "<|start_header_id|>player<|end_header_id|>", "")
+	s = strings.ReplaceAll(s, "<|start_header_id|>dungeonmaster<|end_header_id|>", "")
+
 	s = strings.ReplaceAll(s, fmt.Sprintf("<|start_header_id|>%s<|end_header_id|>", userName), "")
 	s = strings.ReplaceAll(s, fmt.Sprintf("<|start_header_id|>%s<|end_header_id|>", agentName), "")
 	s = strings.ReplaceAll(s, "<|eot_id|>", "")

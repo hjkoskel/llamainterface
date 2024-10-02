@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/hjkoskel/bindstablediff"
 )
 
@@ -46,9 +45,13 @@ func SavePng(fname string, img image.Image) error {
 }
 
 func CreatePngIfNotFound(gen ImageGenerator, fname string, prompt string) error {
-	tex := rl.LoadTexture(fname)
-	if tex.Width != 0 || tex.Height != 0 {
-		return nil //ok...
+	byt, errRead := os.ReadFile(fname)
+	if errRead == nil {
+		_, errDecode := png.Decode(bytes.NewBuffer(byt))
+		if errDecode == nil {
+			return nil //OK
+		}
+
 	}
 	img, imgErr := gen.CreatePic(prompt)
 	if imgErr != nil {
@@ -103,7 +106,7 @@ func (p *FluxImageGenerator) CreatePic(prompt string) (image.Image, error) {
 		return nil, uErr
 	}
 
-	request, errRequesting := http.NewRequest("POST", u, bytes.NewBuffer([]byte(prompt)))
+	request, errRequesting := http.NewRequest("POST", u, bytes.NewBuffer([]byte(strings.ReplaceAll(prompt, "\n", " "))))
 	if errRequesting != nil {
 		return nil, errRequesting
 	}
@@ -148,7 +151,7 @@ type GameArtistSettings struct {
 	Suffix string
 }
 
-func InitArtist(diffusionModelFile string, artSetting GameArtistSettings, formatter PromptFormatter, gen ImageGenerator) (Artist, error) {
+func InitArtist(artSetting GameArtistSettings, formatter PromptFormatter, gen ImageGenerator) (Artist, error) {
 	return Artist{
 		Settings:  artSetting,
 		Gen:       gen,

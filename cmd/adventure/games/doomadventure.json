@@ -1,0 +1,16 @@
+{
+ "TitleGraphicPrompt":"one space marine on top of hill firing guns surrounded by many daemons in hell landscape. Large text Doom on picture.",
+"Introprompt": "You are dungeonmaster who describes scene what player character see, hear.  Keep response short and informative, keep sentences short. Idea is to play first person shooter and shoot daemons in mars base. The player takes on the role of an unnamed space marine. He is a member of the military force who has been stationed on Mars. He is last human on mars, all other are turned into zombies and daemons. Player shoots everything as in first person shooter game. Always mention what weapon player is holding at the moment",
+ "MaxTokens": 32768,
+ "Artist": {
+  "SystemPrompt": "You are render graphics engine of first person shooter. You describe what user writes in list of words format",
+  "Examples": [{
+    "Input":"There is long hallway and there is cacodemon and imp flying. On hallway there is door to left",
+    "Result":"futuristic science fiction mars base hallway  door on lef , there is brown cacodemon and flying red imp"
+    }
+  ],
+  "Prefix": "",
+  "Suffix": "first person shooter game style"
+ },
+ "GameName": "doomadventure"
+}

@@ -26,11 +26,13 @@ type GameCatalogueEntry struct {
 // Load existing or generate
 func (p *GameCatalogueEntry) PrepareImage(gen ImageGenerator) error {
 	//Get latest available pic
+	fmt.Printf("got %d prompt entries\n", len(p.Game.PromptEntries))
 	p.Description = "New game:" + p.Game.GameName
-	for i := len(p.Game.PromptEntries) - 1; 0 <= i; i++ {
-		texture := rl.LoadTexture(p.Game.PromptEntries[i].PictureFileName)
-		if texture.Width != 0 && texture.Height != 0 {
-			p.MenuImage = texture //Shrink?
+	for i := len(p.Game.PromptEntries) - 1; 0 <= i; i-- {
+		fmt.Printf("entry %d/%d\n", i, len(p.Game.PromptEntries))
+		_, errLoad := LoadPng(p.Game.PromptEntries[i].PictureFileName)
+		if errLoad == nil {
+			p.MenuImage = rl.LoadTexture(p.Game.PromptEntries[i].PictureFileName)
 			when := p.Game.LastTime()
 			p.Description = fmt.Sprintf("%s entry%d [%s]", p.Game.GameName, i, when.Local().Format("2006-01-02 15:04:05"))
 			return nil
@@ -109,7 +111,7 @@ func ListSavedGames(savegamedir string) (GameCatalogue, error) {
 		if errListJson != nil || len(jsonFileList) == 0 {
 			continue
 		}
-		if 0 < len(jsonFileList) {
+		if 1 < len(jsonFileList) {
 			fmt.Printf("WARNING MULTIPLE JSON FILES %#v\n", jsonFileList) //TODO HOW TO HANDLE?
 		}
 		jsonfilename := jsonFileList[0]

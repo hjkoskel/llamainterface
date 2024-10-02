@@ -21,7 +21,7 @@ import (
 	"github.com/hjkoskel/bindstablediff"
 )
 
-var promptFormatter PromptFormatter //Common formatter... TODO make switchable if using other models
+//var promptFormatter PromptFormatter //Common formatter... TODO make switchable if using other models
 
 const (
 	LLAMAFILENAME = "/home/henri/Downloads/Meta-Llama-3-8B-Instruct.Q5_K_M.llamafile"
@@ -62,7 +62,7 @@ type PromptEntry struct {
 	Timestamp          time.Time //Nice to have information
 }
 
-func (p *PromptEntry) ToMarkdown() string {
+func (p *PromptEntry) ToMarkdown(promptFormatter PromptFormatter) string {
 	switch p.Type {
 	case PROMPTTYPE_SYS:
 		return fmt.Sprintf("# System prompt\n%s", p.Text)
@@ -86,7 +86,8 @@ type AdventureGame struct {
 
 	MaxTokens int
 
-	Artist GameArtistSettings //promptArtist.txt
+	Artist          GameArtistSettings //promptArtist.txt
+	promptFormatter PromptFormatter
 
 	//totalPrompt   string
 	PromptEntries []PromptEntry //Initial prompt is first, then DM, player,DM,player
@@ -114,7 +115,7 @@ func (p *AdventureGame) WriteBlankFile(fname string) error {
 func (p *AdventureGame) SaveGame() error {
 	var sb strings.Builder
 	for _, entry := range p.PromptEntries {
-		sb.WriteString(entry.ToMarkdown())
+		sb.WriteString(entry.ToMarkdown(p.promptFormatter))
 	}
 
 	d := p.GetSaveDir()
@@ -214,6 +215,7 @@ func loadAdventure(loadGameFile string) (AdventureGame, error) {
 	if result.StartTime.Unix() < 1000 {
 		result.StartTime = time.Now()
 	}
+	result.promptFormatter = Llama31Formatter{} //TODO:Not need to other formatters?
 	return result, errParse
 }
 
@@ -237,8 +239,12 @@ func initAdventure(gameName string, llama llamainterface.LLamaServer, systemprom
 }
 */
 
+func (p *AdventureGame) GameId() string {
+	return fmt.Sprintf("%s%d", p.GameName, p.StartTime.Unix())
+}
+
 func (p *AdventureGame) GetSaveDir() string {
-	return path.Join(SAVEGAMEDIR, fmt.Sprintf("%s%d", p.GameName, p.StartTime.Unix()))
+	return path.Join(SAVEGAMEDIR, p.GameId())
 }
 
 func (p *AdventureGame) RunQuery(query llamainterface.QueryCompletion) (string, error) {
@@ -264,12 +270,18 @@ func (p *AdventureGame) tokenizePrompt(prompt string) (PromptEntry, error) {
 }
 
 // Write to disk? return filename?
-func (p *AdventureGame) GeneratePicture(temperature float64, longText string) (string, string, error) {
+func (p *AdventureGame) GeneratePicture(temperature float64, longText string, imGen ImageGenerator) (string, string, error) {
 	os.Mkdir(p.GetSaveDir(), 0777)
 	outputPngName := path.Join(p.GetSaveDir(), fmt.Sprintf("out%d.png", time.Now().Unix()))
 
-	query := gameBasicQuery()
+	query := gameBasicQuery(p.promptFormatter)
 	query.Temperature = temperature
+
+	artist, artistInitErr := InitArtist(p.Artist, p.promptFormatter, imGen)
+	if artistInitErr != nil {
+		return "", "", fmt.Errorf("error initializing artist %s\n", artistInitErr)
+	}
+
 	query.Prompt = artist.ArtPromptText(longText)
 
 	color.Cyan("\n----ART PROMPT----\n%s\n----------\n", query.Prompt)
@@ -281,6 +293,8 @@ func (p *AdventureGame) GeneratePicture(temperature float64, longText string) (s
 
 	respText = strings.ReplaceAll(respText, "-", "")
 	respText = strings.ReplaceAll(respText, "*", "") //Bullet list?
+
+	color.Yellow("\n----PROMPT FOR IMAGE GENERATION----\n%s\n----------\n", respText)
 
 	img, imgErr := artist.CreatePic(respText)
 	if imgErr != nil {
@@ -302,14 +316,14 @@ func (p *AdventureGame) LastTime() time.Time {
 }
 
 func (p *AdventureGame) UserInteraction(temperature float64, input string) (string, error) {
-	query := gameBasicQuery()
+	query := gameBasicQuery(p.promptFormatter)
 	query.Temperature = temperature
 	//newPromptText := fmt.Sprintf("\n<|start_header_id|>player<|end_header_id|>\n\n%s<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>", input)
-	newPromptText := promptFormatter.Format("", nil, PLAYER, DUNGEONMASTER, input)
+	newPromptText := p.promptFormatter.Format("", nil, PLAYER, DUNGEONMASTER, input)
 
 	/*query.Prompt = fmt.Sprintf("%s\n<|start_header_id|>player<|end_header_id|>%s<|eot_id|><|start_header_id|>dungeonmaster<|end_header_id|>",
 	p.GetTotalPrompt(), input)*/
-
+	fmt.Printf("NEW PROMPT TEXT:%s\n", newPromptText)
 	newToken, errNewToken := p.tokenizePrompt(newPromptText)
 	if errNewToken != nil {
 		return "", fmt.Errorf("system prompt token err %s", errNewToken)
@@ -327,7 +341,7 @@ func (p *AdventureGame) UserInteraction(temperature float64, input string) (stri
 	if errQuery != nil {
 		return respText, errQuery
 	}
-	respText = promptFormatter.AppendStopIfNeeded(respText)
+	respText = p.promptFormatter.AppendStopIfNeeded(respText)
 
 	color.Magenta(fmt.Sprintf("PROMPT RESPONSE IS %s\n", respText))
 
@@ -339,11 +353,11 @@ func (p *AdventureGame) UserInteraction(temperature float64, input string) (stri
 	newToken.Timestamp = time.Now()
 	p.PromptEntries = append(p.PromptEntries, newToken)
 
-	return promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, respText), nil
+	return p.promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, respText), nil
 	//return strings.Replace(respText, "<|eot_id|>", "", -1), nil
 }
 
-func gameBasicQuery() llamainterface.QueryCompletion {
+func gameBasicQuery(promptFormatter PromptFormatter) llamainterface.QueryCompletion {
 	query := llamainterface.DefaultQueryCompletion()
 
 	query.Stream = false
@@ -369,7 +383,51 @@ func gameBasicQuery() llamainterface.QueryCompletion {
 	return query
 }
 
-var artist Artist
+//var artist Artist
+
+func InitLLM(llamafilename string, llamaport int, llamamodelfile string, serverHost string) (llamainterface.LLamaServer, error) {
+	ctxLllama, _ := context.WithCancel(context.Background())
+	var llamacmdFlags llamainterface.ServerCommandLineFlags
+	llamacmdFlags.ToDefaults()
+
+	var llama llamainterface.LLamaServer
+	if 0 < len(llamafilename) {
+		llamacmdFlags.ListenPort = llamaport
+
+		if 0 < len(llamamodelfile) {
+			llamacmdFlags.ModelFilename = llamamodelfile
+		}
+		var errLlamaInit error
+		llama, errLlamaInit = llamainterface.InitLlamafileServer(ctxLllama, llamafilename, llamacmdFlags)
+		if errLlamaInit != nil {
+			return llama, fmt.Errorf("llama init fail %s\n", errLlamaInit)
+		}
+	} else {
+		var errSrv error
+		llama, errSrv = llamainterface.InitLLamaServer(serverHost, llamaport)
+		if errSrv != nil {
+			return llama, fmt.Errorf("err %s\n", errSrv)
+		}
+	}
+
+	healthStatus, _ := llama.GetHealth()
+	waitStarted := time.Now()
+	for healthStatus != "ok" {
+		var errhealth error
+		healthStatus, errhealth = llama.GetHealth()
+		if errhealth != nil {
+			fmt.Printf("llama err...%s\n", errhealth.Error())
+		} else {
+			fmt.Printf("waiting llama %s\n", healthStatus)
+		}
+		if time.Second*600 < time.Since(waitStarted) {
+			return llama, fmt.Errorf("timeout waiting llama health going to ok")
+		}
+
+		time.Sleep(time.Second)
+	}
+	return llama, nil
+}
 
 func main() {
 	pLoadFile := flag.String("load", "", "load existing game from json and continue")
@@ -384,12 +442,20 @@ func main() {
 	//pArtistBaseTextFile := flag.String("ab", "promptArtist.txt", "prompt for generating image prompts from dungeon master text")
 	//pMaxTokens := flag.Int("maxtokens", 1024, "number of max tokens for LLM model")
 
-	pLlamafile := flag.String("l", LLAMAFILENAME, ".llamafile filename, starts that file as server")
-	pLlamaport := flag.Int("lp", 0, "llamafile port, use 0 if let kernel decide port")
+	//pLlamafile := flag.String("l", LLAMAFILENAME, ".llamafile filename, starts that file as server")
+	//pLlamafile := flag.String("l", "/usr/local/bin/llamafile", ".llamafile filename, starts that file as server. Or llama-server file (then model is needed)")
+	pLlamafile := flag.String("l", "", ".llamafile filename, starts that file as server")
+
+	pLlamafileModel := flag.String("lm", "", "use alternative .gguf model file on this llamafile instead")
+	//pLlamaport := flag.Int("lp", 0, "llamafile port, use 0 if let kernel decide port")
 	pServerHost := flag.String("h", "127.0.0.1", "llama.cpp server host")
-	pServerPort := flag.Int("p", 8080, "llama.cpp server port")
+	//pServerPort := flag.Int("p", 8080, "llama.cpp server port")
+	pllmPort := flag.Int("p", 8080, "llama.cpp or lllamafile server port. 0 for kernel decides for llamafile")
+
+	pUiPort := flag.Int("uip", 2222, "web ui port")
 
 	pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/sd-v1-4-ggml-model-f16.bin", "diffusion model file")
+	//pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/HassanBlend1.5-ggml-model-q4_1.bin", "diffusion model file")
 
 	pFluxHost := flag.String("fh", "127.0.0.1", "hostname of flux.1 server")
 	pFluxPort := flag.Int("fp", 8800, "flux.1 server port")
@@ -398,8 +464,25 @@ func main() {
 	pCreateBlank := flag.String("blank", "", "Create blank game file as example from this for creating new adventure games")
 	flag.Parse()
 
-	promptFormatter = Llama31Formatter{} //TODO choose and support other formats
+	if len(*pLlamafile) == 0 && *pllmPort == 0 {
+		fmt.Printf("llama port must be defined when not starting llamafile from executable")
+		return
+	}
 
+	if *pllmPort == 0 {
+		llamaport, errGetPort := llamainterface.GetFreePort()
+		if errGetPort != nil {
+			fmt.Printf("getting free port failed %s\n", errGetPort)
+			return
+		}
+		pllmPort = &llamaport
+	}
+
+	//webUiRouter, errWebUiRouter := InitRouter()
+
+	/*******************************************
+	* Initialize model that generates pictures *
+	********************************************/
 	var imGen ImageGenerator
 	if 0 < len(*pFluxHost) {
 		var imGenErr error
@@ -417,132 +500,72 @@ func main() {
 		}
 	}
 
-	/**** Check is there title picture for menu *****/
-	//fmt.Sprintf("%s [%s]", game.GameName, game.StartTime)
-	ui, uiErr := InitGraphicalUI("ADVENTURE")
-	if uiErr != nil {
-		fmt.Printf("UI init err %s\n", uiErr)
-		return
-	}
-
-	ui.SetGenerating("Starting adventure: generate title picture, wait...")
-	//ui.Render()
-
+	/********************************
+	* Generate missing media assets *
+	*********************************/
 	errCreateTitle := CreatePngIfNotFound(imGen, TITLEPICTUREFILE, MAINTITLESCREENGRAPHICPROMPT)
 	if errCreateTitle != nil {
 		fmt.Printf("\nerror while creating title picture %s\n", errCreateTitle)
 		return
 	}
-
-	errImg := ui.SplashScreen(TITLEPICTUREFILE)
-	if errImg != nil {
-		fmt.Printf("Failed loading title...%s re-trying generate title\n\n", errImg)
-		return
-	}
-	ui.Render()
 	//Generate menu
 	errCreateMenu := CreatePngIfNotFound(imGen, MENUPICTUREFILE, MAINMENUGRAPHICPROMPT)
 	if errCreateMenu != nil {
 		fmt.Printf("error creating menu pictur file %s\n", errCreateMenu)
 	}
+	//generate pictures for newgame
 
-	ui.SetGenerating("Press anykey")
-	ui.Render()
-	//ui.WaitPressAnykey()
-
-	ctxLllama, _ := context.WithCancel(context.Background())
-
-	var llamacmdFlags llamainterface.ServerCommandLineFlags
-	llamacmdFlags.ToDefaults()
-
-	var llama llamainterface.LLamaServer
-	if 0 < len(*pLlamafile) {
-		var errLlamaInit error
-		if *pLlamaport == 0 {
-			errGetPort := llamacmdFlags.GetPort() //Pick random internal port
-			if errGetPort != nil {
-				fmt.Printf("Internal error for getting TCP port %s\n", errGetPort)
-				return
-			}
-		} else {
-			llamacmdFlags.ListenPort = *pLlamaport
-		}
-		//llamacmdFlags.NGPULayers = 9999
-		llama, errLlamaInit = llamainterface.InitLlamafileServer(ctxLllama, *pLlamafile, llamacmdFlags)
-		if errLlamaInit != nil {
-			fmt.Printf("llama init fail %s\n", errLlamaInit)
-			return
-		}
-	} else {
-		var errSrv error
-		llama, errSrv = llamainterface.InitLLamaServer(*pServerHost, *pServerPort)
-		if errSrv != nil {
-			fmt.Printf("err %s\n", errSrv)
-			return
+	cat, catErr := ListNewGames(GAMESDIR)
+	if catErr != nil {
+		fmt.Printf("FAILED LISTING GAME CATALOG %s\n", catErr)
+		return
+	}
+	for _, catItem := range cat {
+		fmt.Printf("Generating start image %s\n", catItem.TitleImageFileName)
+		errPrepare := CreatePngIfNotFound(imGen, catItem.TitleImageFileName, catItem.Game.TitleGraphicPrompt)
+		if errPrepare != nil {
+			fmt.Printf("failed preparing %s\n", errPrepare)
+			continue
 		}
 	}
 
-	healthStatus, _ := llama.GetHealth()
-	for healthStatus != "ok" {
-		var errhealth error
-		healthStatus, errhealth = llama.GetHealth()
-		if errhealth != nil {
-			fmt.Printf("llama err...%s\n", errhealth.Error())
-		} else {
-			fmt.Printf("waiting llama %s\n", healthStatus)
-		}
-		time.Sleep(time.Second)
+	/************************
+	** Initialize LLM model
+	*************************/
+	llama, errllama := InitLLM(*pLlamafile, *pllmPort, *pLlamafileModel, *pServerHost)
+	if errllama != nil {
+		fmt.Printf("error starting llm %s\n", errllama)
+		return
 	}
 
+	/*******
+	* start web UI if wanted in server mode
+	*******/
+	if 0 < *pUiPort {
+		errWebRun := RunAsWebServer(*pUiPort, imGen, llama, *pTempTextPrompt, *pTempImageTextPrompt)
+		fmt.Printf("WEB UI FAILED WITH ERROR %s\n", errWebRun)
+		return
+	}
+
+	/*****************
+	* Start local ui *
+	******************/
+	fmt.Printf("\n\n\n--STARTING UI--\n\n")
+	ui, errUi := localUIStart()
+	if errUi != nil {
+		fmt.Printf("%s\n", errUi)
+		return
+	}
+
+	/****************
+	* Get local game
+	*****************/
 	var game AdventureGame
+	game.promptFormatter = Llama31Formatter{} //TODO choose and support other formats
+
 	loadingOldGame := false
-	if len(*pLoadFile) == 0 { //Start new?
-		//Lets show main menu
-		menuSel, errMenuSel := ui.RunMainMenu()
-		if errMenuSel != nil {
-			fmt.Printf("menu selection fail %s\n", errMenuSel)
-			return
-		}
-		fmt.Printf("\n\nMENU SELECTION %s\n", menuSel)
-
-		var cat GameCatalogue
-		var catErr error
-		switch menuSel {
-		case MAINMENUSELECT_NEWGAME:
-			cat, catErr = ListNewGames(GAMESDIR)
-		case MAINMENUSELECT_CONTINUE, MAINMENUSELECT_BRANCHOLD:
-			loadingOldGame = true
-			cat, catErr = ListSavedGames(SAVEGAMEDIR)
-		}
-		if catErr != nil {
-			fmt.Printf("error catalogueing %s\n", catErr)
-			return
-		}
-
-		index := 0
-		for gamename, catItem := range cat {
-			index++
-			ui.generatingText = fmt.Sprintf("Generating start image %v/%v : %s", index, len(cat), catItem.Game.GameName)
-			ui.Render()
-			errPrepare := catItem.PrepareImage(imGen)
-			if errPrepare != nil {
-				fmt.Printf("failed preparing %s\n", errPrepare)
-			}
-			cat[gamename] = catItem
-		}
-		pickResult, errPick := ui.PickFromCatalogue(cat)
-		if errPick != nil {
-			fmt.Printf("error picking %s\n", errPick)
-			return
-		}
-		fmt.Printf("Picked %#v\n", pickResult.Game.GameName)
-		game = pickResult.Game
-
-		if menuSel == MAINMENUSELECT_BRANCHOLD {
-			game.StartTime = time.UnixMilli(0)
-		}
-
-	} else {
+	if 0 < len(*pLoadFile) {
+		// TODO PÄÄOHJELMAAN JOS KOMENTORIVI ARGUMENTILLA
 		loadingOldGame = true
 		fmt.Printf("\n--- Loading:%s ---\n\n", *pLoadFile)
 		var errGameInit error
@@ -554,25 +577,30 @@ func main() {
 		if *pBrancToNewGame {
 			game.StartTime = time.UnixMilli(0)
 		}
-	}
-	game.llama = llama
-
-	if 0 < len(*pCreateBlank) {
-		errWriteBlank := game.WriteBlankFile(*pCreateBlank)
-		if errWriteBlank != nil {
-			fmt.Printf("error writing blank file %s  err:%s", *pCreateBlank, errWriteBlank)
+	} else {
+		var errGetGame error
+		game, loadingOldGame, errGetGame = localUIGetGame(ui, imGen)
+		if errGetGame != nil {
+			fmt.Printf("%s\n", errGetGame)
 			return
 		}
-		fmt.Printf("\n\n--Exported %s\n", *pCreateBlank)
-		return
+		//Not sure is this needed?
+		if 0 < len(*pCreateBlank) {
+			errWriteBlank := game.WriteBlankFile(*pCreateBlank)
+			if errWriteBlank != nil {
+				fmt.Printf("error writing blank file %s  err:%s", *pCreateBlank, errWriteBlank)
+				return
+			}
+			fmt.Printf("\n\n--Exported %s\n", *pCreateBlank)
+			return
+		}
 	}
+
+	game.llama = llama
 
 	if len(game.PromptEntries) == 0 { //NEED TO INITIALIZE.  TODO PUT INTO LOAD METHOD!
 		query := llamainterface.DefaultQueryCompletion()
-		//query.Prompt = fmt.Sprintf("<|start_header_id|>system<|end_header_id|>\n\n%s<|eot_id|>", game.Introprompt)
-
-		query.Prompt = promptFormatter.Format(game.Introprompt, nil, PLAYER, DUNGEONMASTER, "")
-
+		query.Prompt = game.promptFormatter.Format(game.Introprompt, nil, PLAYER, DUNGEONMASTER, "")
 		tokens, errTokenize := llama.PostTokenize(query.Prompt, time.Minute*5)
 		if errTokenize != nil {
 			fmt.Errorf("system prompt tokenization error %s", errTokenize)
@@ -583,95 +611,20 @@ func main() {
 
 	ui.SetGenerating("Starting up, wait....")
 	ui.Render()
-	var artistInitErr error
-	artist, artistInitErr = InitArtist(*pDiffusionModelFile, game.Artist, promptFormatter, imGen)
+
+	/**********************************************
+	* Init prompt generators: artist for graphics, TODO summarizer *
+	***********************************************/
+	/*var artistInitErr error
+	artist, artistInitErr = InitArtist(game.Artist, promptFormatter, imGen)
 	if artistInitErr != nil {
 		fmt.Printf("error initializing artist %s\n", artistInitErr)
 		return
+	}*/
+
+	localUiRunErr := localUIFlow(ui, loadingOldGame, game, *pTempTextPrompt, *pTempImageTextPrompt, imGen)
+	if localUiRunErr == nil {
+		return
 	}
-
-	//Simple read input
-	var errUser error
-	userInput := "introduce game" //Starting query, not printing on ui, part of system prompt getting started
-
-	if loadingOldGame {
-		last := game.PromptEntries[len(game.PromptEntries)-1]
-		if last.Type == PROMPTTYPE_DM {
-			userInput = "" //Nope... loaded game wait input
-		}
-		//get pic and latest text
-		txt := promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, last.Text)
-		fmt.Printf("\n\nEXTRACTED TEXT IS\n%s\n\n", txt)
-
-		ui.SetDungeonMasterText(txt)
-		ui.SetImagePromptText(last.PictureDescription) //Just set for debug?
-		ui.SetPicture(last.PictureFileName)
-	}
-
-	for {
-		if 0 < len(userInput) {
-			fmt.Printf("---process user input:%s ---\n", userInput)
-			ui.SetGenerating("Running LLM....")
-			ui.Render()
-
-			dungeonMastersays, errRun := game.UserInteraction(*pTempTextPrompt, userInput)
-			if errRun != nil {
-				fmt.Printf("ERROR: Failed running game %s\n", errRun)
-				break
-			} else {
-				game.StoreLatestTextOutput()
-				//ui.PrintDungeonMaster(dungeonMastersays)
-				ui.SetDungeonMasterText(dungeonMastersays)
-				renderErr := ui.Render()
-				if renderErr != nil {
-					fmt.Printf("error rendering UI %s\n", renderErr)
-					return
-				}
-			}
-
-			ui.SetGenerating("Generating picture...")
-			ui.Render()
-			picDescription, picFileName, errPic := game.GeneratePicture(*pTempImageTextPrompt, dungeonMastersays)
-			if errPic != nil {
-				fmt.Printf("\n\nERROR generating picture:%s\n", errPic)
-				return
-			}
-			fmt.Printf("picture filename:%s\n", picFileName)
-			color.Yellow(picDescription)
-			fmt.Printf("\n\n")
-			ui.SetPicture(picFileName)
-
-			ui.SetImagePromptText(picDescription)
-			renderErr := ui.Render()
-			if renderErr != nil {
-				fmt.Printf("error rendering UI %s\n", renderErr)
-				return
-			}
-
-			errSave := game.SaveGame()
-			if errSave != nil {
-				fmt.Printf("error saving game %s\n", errSave)
-				return
-			}
-		}
-		//userInput, errUser = ui.GetUserInput()
-		fmt.Printf("--get user input--\n")
-		userInput, errUser = ui.GetPrompt()
-		if errUser != nil {
-			fmt.Printf("\n\nExit by %s\n\n", errUser)
-			break
-		}
-		userInput = strings.TrimSpace(userInput)
-		//ui.PrintUser(userInput)
-
-		updated, errUpdate := game.CheckOutputChanges()
-		if errUpdate != nil {
-			fmt.Printf("\n\nERR %s\n", errUpdate)
-			return
-		}
-		if updated {
-			fmt.Printf("\n\nUSER UPDATED PROMPT!!\n")
-		}
-	}
-
+	fmt.Printf("\n\n\nFAIL %s\n", localUiRunErr)
 }
