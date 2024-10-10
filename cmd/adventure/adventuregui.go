@@ -55,13 +55,15 @@ const (
 )
 
 type GraphicalUI struct {
-	autoUpdate        bool
-	fnt               rl.Font
-	dungeonMasterText string
-	userPromptText    string //This is what ui shows
-	imagePromptText   string //If no picture, this is shown
-	centeredPic       bool   //used for
-	pic               rl.Texture2D
+	autoUpdate              bool
+	fnt                     rl.Font
+	dungeonMasterText       string
+	dungeonMasterTextDouble string //A little stupid HACK
+
+	userPromptText  string //This is what ui shows
+	imagePromptText string //If no picture, this is shown
+	centeredPic     bool   //used for
+	pic             rl.Texture2D
 
 	scrollPosition float32
 	scrollSpeed    float32
@@ -84,7 +86,18 @@ func (p *GraphicalUI) SplashScreen(picFileName string) error {
 	return nil
 }
 
+func (p *GraphicalUI) SetPage(pictureFileName string, page AdventurePage) {
+	p.centeredPic = false
+	p.dungeonMasterText = WordWrap(page.Text, p.TextColumnWidth)
+	p.dungeonMasterTextDouble = WordWrap(page.Text, p.TextColumnWidth*2)
+	p.imagePromptText = WordWrap(page.PictureDescription, p.TextColumnWidth)
+	p.scrollPosition = -16 //-SCREEN_H / 3
+	p.SetPicture(pictureFileName)
+
+}
+
 // Set text and do wrapping
+/*
 func (p *GraphicalUI) SetDungeonMasterText(txt string) {
 	p.centeredPic = false
 	p.dungeonMasterText = WordWrap(txt, p.TextColumnWidth)
@@ -93,7 +106,7 @@ func (p *GraphicalUI) SetDungeonMasterText(txt string) {
 func (p *GraphicalUI) SetImagePromptText(txt string) {
 	p.centeredPic = false
 	p.imagePromptText = WordWrap(txt, p.TextColumnWidth)
-}
+}*/
 
 func (p *GraphicalUI) SetGenerating(txt string) {
 	p.generatingText = txt
@@ -106,16 +119,21 @@ func (p *GraphicalUI) Render() error {
 
 	rl.BeginDrawing()
 	rl.ClearBackground(rl.Black)
-	rl.DrawTextEx(p.fnt, p.dungeonMasterText, rl.Vector2{X: 0, Y: -p.scrollPosition}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 255, A: 255})
-	if 0 < len(p.imagePromptText) {
-		rl.DrawTextEx(p.fnt, p.imagePromptText, rl.Vector2{X: float32(SCREEN_W - p.pic.Width), Y: 0}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
-	}
 
 	if 0 < p.pic.Width && 0 < p.pic.Height {
+		rl.DrawTextEx(p.fnt, p.dungeonMasterText, rl.Vector2{X: 0, Y: -p.scrollPosition}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 255, A: 255})
+		if 0 < len(p.imagePromptText) {
+			rl.DrawTextEx(p.fnt, p.imagePromptText, rl.Vector2{X: float32(SCREEN_W - p.pic.Width), Y: 0}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
+		}
 		if p.centeredPic {
 			rl.DrawTexture(p.pic, SCREEN_W/2-p.pic.Width/2, 0, rl.White)
 		} else {
 			rl.DrawTexture(p.pic, SCREEN_W-p.pic.Width, 0, rl.White)
+		}
+	} else {
+		rl.DrawTextEx(p.fnt, p.dungeonMasterTextDouble, rl.Vector2{X: 0, Y: -p.scrollPosition}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 255, A: 255})
+		if 0 < len(p.imagePromptText) {
+			rl.DrawTextEx(p.fnt, p.imagePromptText, rl.Vector2{X: float32(SCREEN_W - p.pic.Width), Y: 0}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
 		}
 	}
 
@@ -235,6 +253,10 @@ func (p *GraphicalUI) GetPrompt() (string, error) {
 }
 
 func (p *GraphicalUI) SetPicture(picFileName string) error { //Pass thru disk.. it is logged anyways...
+	if len(picFileName) == 0 {
+		p.pic = rl.Texture2D{}
+		return nil
+	}
 	p.pic = rl.LoadTexture(picFileName)
 	if p.pic.Width == 0 || p.pic.Height == 0 {
 		return fmt.Errorf("failed loading %s as texture", picFileName)
@@ -326,6 +348,12 @@ func (p *GraphicalUI) PickFromCatalogue(cat GameCatalogue) (GameCatalogueEntry, 
 	if len(cat) == 0 {
 		return GameCatalogueEntry{}, fmt.Errorf("no games")
 	}
+
+	pictureArr := make([]rl.Texture2D, len(cat))
+	for i, c := range cat {
+		pictureArr[i] = rl.LoadTexture(c.MenuPicture)
+	}
+
 	//Draw
 	p.autoUpdate = false
 	for !rl.WindowShouldClose() {
@@ -339,37 +367,30 @@ func (p *GraphicalUI) PickFromCatalogue(cat GameCatalogue) (GameCatalogueEntry, 
 		//fmt.Printf("draw roller pos:%v chosen %v center:%v offset:%v\n", position, chosenIndex, centerPicIndex, offset)
 
 		if centerPicIndex+1 < len(cat) {
-			entry := cat[centerPicIndex+1]
-			img := entry.MenuImage
+			index := centerPicIndex + 1
 			xpos := SCREEN_W + picw - offset
-			rl.DrawTexture(img, xpos, 0, rl.White)
+			rl.DrawTexture(pictureArr[index], xpos, 0, rl.White)
 			rl.DrawRectangle(xpos, 0, picw, 100, imco.RGBA{R: 0, G: 0, B: 0, A: 230})
-			rl.DrawTextEx(p.fnt, entry.Description, rl.Vector2{X: float32(xpos), Y: 50}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
+			rl.DrawTextEx(p.fnt, cat[index].Label, rl.Vector2{X: float32(xpos), Y: 50}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
 		}
 
 		//Center
 		if centerPicIndex < len(cat) {
-			entry := cat[centerPicIndex]
-			img := entry.MenuImage
+			index := centerPicIndex
 			xpos := SCREEN_W - offset
-			rl.DrawTexture(img, xpos, 0, rl.White)
+			rl.DrawTexture(pictureArr[index], xpos, 0, rl.White)
 			rl.DrawRectangle(xpos, 0, picw, 100, imco.RGBA{R: 0, G: 0, B: 0, A: 230})
-			rl.DrawTextEx(p.fnt, entry.Description, rl.Vector2{X: float32(xpos), Y: 50}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
+			rl.DrawTextEx(p.fnt, cat[index].Label, rl.Vector2{X: float32(xpos), Y: 50}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
 		}
 
 		//First
 		if 0 < centerPicIndex {
-			entry := cat[centerPicIndex-1]
-			img := entry.MenuImage
-			if img.Width == 0 || img.Height == 0 {
-				p.autoUpdate = true
-				return GameCatalogueEntry{}, fmt.Errorf("missing pic %v", entry.Game.GameName)
-			}
+			index := centerPicIndex - 1
 
 			xpos := SCREEN_W - p.pic.Width - offset
-			rl.DrawTexture(img, xpos, 0, rl.White)
+			rl.DrawTexture(pictureArr[index], xpos, 0, rl.White)
 			rl.DrawRectangle(xpos, 0, picw, 100, imco.RGBA{R: 0, G: 0, B: 0, A: 230})
-			rl.DrawTextEx(p.fnt, entry.Description, rl.Vector2{X: float32(xpos), Y: 50}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
+			rl.DrawTextEx(p.fnt, cat[index].Label, rl.Vector2{X: float32(xpos), Y: 50}, MAINFONTSIZE, 6, imco.RGBA{R: 255, G: 255, B: 0, A: 255})
 		}
 		rl.EndDrawing()
 

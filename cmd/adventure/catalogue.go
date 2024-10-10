@@ -8,61 +8,24 @@ package main
 
 import (
 	"fmt"
+	"llamainterface"
 	"os"
 	"path"
-	"sort"
 	"strings"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
+	"time"
 )
 
 type GameCatalogueEntry struct {
-	Game               AdventureGame
-	TitleImageFileName string //Whole path
-	MenuImage          rl.Texture2D
-	Description        string
-}
+	//Game               AdventureGame  REALLY DO JUST CATALOGUEING
+	Id                 string
+	Name               string
+	TitleDescription   string
+	TitleImageFileName string //Whole path to title image or to the latest picture in game
+	MenuPicture        string
 
-// Load existing or generate
-func (p *GameCatalogueEntry) PrepareImage(gen ImageGenerator) error {
-	//Get latest available pic
-	fmt.Printf("got %d prompt entries\n", len(p.Game.PromptEntries))
-	p.Description = "New game:" + p.Game.GameName
-	for i := len(p.Game.PromptEntries) - 1; 0 <= i; i-- {
-		fmt.Printf("entry %d/%d\n", i, len(p.Game.PromptEntries))
-		_, errLoad := LoadPng(p.Game.PromptEntries[i].PictureFileName)
-		if errLoad == nil {
-			p.MenuImage = rl.LoadTexture(p.Game.PromptEntries[i].PictureFileName)
-			when := p.Game.LastTime()
-			p.Description = fmt.Sprintf("%s entry%d [%s]", p.Game.GameName, i, when.Local().Format("2006-01-02 15:04:05"))
-			return nil
-		}
-	}
-	p.MenuImage = rl.LoadTexture(p.TitleImageFileName)
-	if p.MenuImage.Width != 0 && p.MenuImage.Height != 0 {
-		return nil
-	}
-	if p.TitleImageFileName == "" {
-		return fmt.Errorf("internal error:image file name not defined")
-	}
-
-	if p.Game.TitleGraphicPrompt == "" {
-		return fmt.Errorf("internal error:No game TitleGraphicPrompt")
-	}
-
-	img, imgErr := gen.CreatePic(p.Game.TitleGraphicPrompt)
-	if imgErr != nil {
-		return fmt.Errorf("error creating pic %s", imgErr)
-	}
-	errSave := SavePng(p.TitleImageFileName, img)
-	if errSave != nil {
-		return fmt.Errorf("error saving title picture to %s  err:%s", p.TitleImageFileName, errSave)
-	}
-	p.MenuImage = rl.LoadTexture(p.TitleImageFileName)
-	if p.MenuImage.Width != 0 && p.MenuImage.Height != 0 {
-		return nil
-	}
-	return fmt.Errorf("internal error, still no title picture %s", p.TitleImageFileName)
+	Label        string
+	GameFileName string
+	LastPlayed   time.Time
 }
 
 type GameCatalogue []GameCatalogueEntry
@@ -70,11 +33,11 @@ type GameCatalogue []GameCatalogueEntry
 // Sort last played
 func (m GameCatalogue) Len() int { return len(m) }
 func (m GameCatalogue) Less(i, j int) bool {
-	a := []GameCatalogueEntry(m)[i]
-	b := []GameCatalogueEntry(m)[j]
-
-	return a.Game.LastTime().After(b.Game.LastTime())
+	a := []GameCatalogueEntry(m)[i].LastPlayed
+	b := []GameCatalogueEntry(m)[j].LastPlayed
+	return a.After(b)
 }
+
 func (m GameCatalogue) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
 
 func getFirstJsonFilesFromDir(dirname string) ([]string, error) {
@@ -95,7 +58,85 @@ func getFirstJsonFilesFromDir(dirname string) ([]string, error) {
 	return names, nil
 }
 
-func ListSavedGames(savegamedir string) (GameCatalogue, error) {
+func ListSavedGamesJson(savegamedir string, llama *llamainterface.LLamaServer) ([]string, error) {
+	result := []string{}
+	saveDirContent, errDirContent := os.ReadDir(savegamedir)
+	if errDirContent != nil {
+		return nil, errDirContent
+	}
+	for _, dirEntry := range saveDirContent {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		jsonFiles, errJsonFiles := getFirstJsonFilesFromDir(path.Join(savegamedir, dirEntry.Name()))
+		if errJsonFiles != nil {
+			fmt.Printf("error listing savegame %s\n", dirEntry.Name())
+			continue
+		}
+		if len(jsonFiles) != 1 {
+			fmt.Printf("invalid number of json files %d\n", len(jsonFiles))
+			continue
+		}
+		//Get json from dir
+		result = append(result, jsonFiles[0])
+	}
+	return result, nil
+}
+
+func ListNewGamesJson(newgameDirName string, llama *llamainterface.LLamaServer) ([]string, error) {
+	result := []string{}
+
+	dirContent, errDirContent := os.ReadDir(newgameDirName)
+	if errDirContent != nil {
+		return nil, errDirContent
+	}
+	for _, fileEntry := range dirContent {
+		if fileEntry.IsDir() || !strings.HasSuffix(fileEntry.Name(), ".json") {
+			continue
+		}
+		result = append(result, path.Join(newgameDirName, fileEntry.Name()))
+	}
+	return result, nil
+}
+
+func GameJsonToCatalogueEntry(fname string, llama *llamainterface.LLamaServer) (GameCatalogueEntry, error) {
+	g, errG := loadAdventure(fname, llama)
+	if errG != nil {
+		return GameCatalogueEntry{}, fmt.Errorf("was not able to open game %s error:%s", fname, errG)
+	}
+	gametime := g.StartTime
+	labeltext := "New:" + g.GameName
+	if 0 < len(g.Pages) {
+		gametime = g.Pages[len(g.Pages)-1].Timestamp
+		labeltext = fmt.Sprintf("%s n:%v %s", g.GameName, len(g.Pages), time.Since(gametime))
+	}
+
+	return GameCatalogueEntry{
+		Id:                 g.GameId(),
+		Name:               g.GameName,
+		TitleDescription:   g.TitleGraphicPrompt,
+		TitleImageFileName: g.gameTitlepictureFilename,
+		MenuPicture:        g.GetMenuPictureFile(),
+		Label:              labeltext,
+		GameFileName:       fname,
+		LastPlayed:         gametime,
+	}, nil
+}
+
+func CreateToCatalogue(filelist []string, llama *llamainterface.LLamaServer) (GameCatalogue, error) {
+	result := make([]GameCatalogueEntry, len(filelist))
+	var errLoad error
+	for i, fname := range filelist {
+		result[i], errLoad = GameJsonToCatalogueEntry(fname, llama)
+		if errLoad != nil {
+			return GameCatalogue{}, errLoad
+		}
+	}
+	return result, nil
+}
+
+/*
+func ListSavedGames(savegamedir string, llama *llamainterface.LLamaServer) (GameCatalogue, error) {
 	result := []GameCatalogueEntry{}
 
 	saveDirContent, errDirContent := os.ReadDir(savegamedir)
@@ -107,7 +148,8 @@ func ListSavedGames(savegamedir string) (GameCatalogue, error) {
 			continue
 		}
 		//Get json from dir
-		jsonFileList, errListJson := getFirstJsonFilesFromDir(path.Join(savegamedir, dirEntry.Name()))
+		jsonFilename := path.Join(savegamedir, dirEntry.Name())
+		jsonFileList, errListJson := getFirstJsonFilesFromDir(jsonFilename)
 		if errListJson != nil || len(jsonFileList) == 0 {
 			continue
 		}
@@ -116,17 +158,23 @@ func ListSavedGames(savegamedir string) (GameCatalogue, error) {
 		}
 		jsonfilename := jsonFileList[0]
 
-		g, errG := loadAdventure(jsonfilename)
+		g, errG := loadAdventure(jsonfilename, llama)
 		if errG != nil {
 			fmt.Printf("was not able to open game %s error:%s", jsonfilename, errG)
 			continue
 		}
 
+		gametime := g.StartTime
+		if 0 < len(g.Pages) {
+			gametime = g.Pages[len(g.Pages)-1].Timestamp
+		}
+
 		//Is there title picture. If there is, load
 		result = append(result, GameCatalogueEntry{
-			Game:               g,
-			TitleImageFileName: strings.Replace(jsonfilename, ".json", ".png", 1),
-			//TitleImage     rl.Texture2D
+			TitleImageFileName: g.gameTitlepictureFilename,
+			Label:              "New:" + g.GameName,
+			GameFileName:       jsonFilename,
+			LastPlayed:         gametime,
 		})
 	}
 	sort.Sort(GameCatalogue(result)) //If there is timestamp?
@@ -135,7 +183,7 @@ func ListSavedGames(savegamedir string) (GameCatalogue, error) {
 }
 
 // ListNewGames.. if there are no pictures of games then those are rendered after...
-func ListNewGames(newgameDirName string) (GameCatalogue, error) {
+func ListNewGames(newgameDirName string, llama *llamainterface.LLamaServer) (GameCatalogue, error) {
 	result := []GameCatalogueEntry{}
 
 	dirContent, errDirContent := os.ReadDir(newgameDirName)
@@ -147,7 +195,7 @@ func ListNewGames(newgameDirName string) (GameCatalogue, error) {
 			continue
 		}
 		totalFilename := path.Join(newgameDirName, fileEntry.Name())
-		g, errG := loadAdventure(totalFilename)
+		g, errG := loadAdventure(totalFilename, llama)
 		if errG != nil {
 			fmt.Printf("was not able to open game %s error:%s", totalFilename, errG)
 			continue
@@ -163,3 +211,4 @@ func ListNewGames(newgameDirName string) (GameCatalogue, error) {
 	sort.Sort(GameCatalogue(result)) //If there is timestamp?
 	return result, nil
 }
+*/

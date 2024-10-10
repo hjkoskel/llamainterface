@@ -116,6 +116,10 @@ func InitLLamaServer(hostname string, port int) (LLamaServer, error) {
 }
 
 func (p *LLamaServer) PostQuery(functionality string, payload []byte, feed chan string, timeout time.Duration) (string, error) {
+	if len(p.baseUrl) == 0 { //For easier debug if mis using library
+		return "", fmt.Errorf("error llamaserver does not have baseUrl defined")
+	}
+
 	postUrl, errJoin := url.JoinPath(p.baseUrl, functionality)
 	if errJoin != nil {
 		return "", fmt.Errorf("error formatting url base=%s functionality=%v", p.baseUrl, functionality)

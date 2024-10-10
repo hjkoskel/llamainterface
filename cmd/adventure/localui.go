@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"strings"
+	"llamainterface"
+	"path"
 	"time"
-
-	"github.com/fatih/color"
 )
 
 func localUIStart() (*GraphicalUI, error) {
@@ -26,51 +25,71 @@ func localUIStart() (*GraphicalUI, error) {
 	return ui, nil
 }
 
-func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator) (AdventureGame, bool, error) {
+func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface.LLamaServer) (AdventureGame, error) {
 	var game AdventureGame
-	loadingOldGame := false
 	//Lets show main menu
 	menuSel, errMenuSel := ui.RunMainMenu()
 	if errMenuSel != nil {
-		return AdventureGame{}, false, fmt.Errorf("menu selection fail %s", errMenuSel)
+		return AdventureGame{}, fmt.Errorf("menu selection fail %s", errMenuSel)
 	}
-	var cat GameCatalogue
-	var catErr error
+
+	var gameJsonList []string
+	var errGameList error
+
 	switch menuSel {
 	case MAINMENUSELECT_NEWGAME:
-		cat, catErr = ListNewGames(GAMESDIR)
+		gameJsonList, errGameList = ListNewGamesJson(GAMESDIR, llama)
 	case MAINMENUSELECT_CONTINUE, MAINMENUSELECT_BRANCHOLD:
-		loadingOldGame = true
-		cat, catErr = ListSavedGames(SAVEGAMEDIR)
+		gameJsonList, errGameList = ListSavedGamesJson(SAVEGAMEDIR, llama)
+
 	}
+	if errGameList != nil {
+		return AdventureGame{}, fmt.Errorf("Error game list %s\n", errGameList)
+	}
+
+	fmt.Printf("--- List of game json files ---\n")
+	for i, s := range gameJsonList {
+		fmt.Printf(" %v: %s\n", i, s)
+	}
+
+	cat, catErr := CreateToCatalogue(gameJsonList, llama)
+
 	if catErr != nil {
-		return AdventureGame{}, false, fmt.Errorf("error catalogueing %s", catErr)
+		return AdventureGame{}, fmt.Errorf("error catalogueing %s", catErr)
 	}
 
 	//TODO GENERATE MISSING GRAPHICS WHEN BUILDING CATALOGUE
-	index := 0
-	for gamename, catItem := range cat {
-		index++
-		ui.generatingText = fmt.Sprintf("Generating start image %v/%v : %s", index, len(cat), catItem.Game.GameName)
-		ui.Render()
-		errPrepare := catItem.PrepareImage(imGen)
-		if errPrepare != nil {
-			fmt.Printf("failed preparing %s\n", errPrepare)
-		}
-		cat[gamename] = catItem
-	}
+	/*
+		index := 0
+		for gamename, catItem := range cat {
+			index++
+			ui.generatingText = fmt.Sprintf("Generating start image %v/%v : %s", index, len(cat), catItem.Game.GameName)
+			ui.Render()
+			errPrepare := catItem.PrepareImage(imGen)
+			if errPrepare != nil {
+				fmt.Printf("failed preparing %s\n", errPrepare)
+			}
+			catItem.MenuImage = rl.LoadTexture(catItem.TitleImageFileName)
+			if catItem.MenuImage.Width == 0 || catItem.MenuImage.Height == 0 {
+				return AdventureGame{}, false, fmt.Errorf("error loading menu picture %s", catItem.MenuImage)
+			}
+			cat[gamename] = catItem
+		}*/
 
 	pickResult, errPick := ui.PickFromCatalogue(cat)
 	if errPick != nil {
-		return AdventureGame{}, false, fmt.Errorf("localUIGetGame: error picking %s\n", errPick)
+		return AdventureGame{}, fmt.Errorf("localUIGetGame: error picking %s\n", errPick)
 	}
-	game = pickResult.Game
+	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama)
+	if errGameLoad != nil {
+		return AdventureGame{}, errGameLoad
+	}
 
 	if menuSel == MAINMENUSELECT_BRANCHOLD {
 		game.StartTime = time.UnixMilli(0)
 	}
 
-	return game, loadingOldGame, nil
+	return game, nil
 }
 
 const INITIALPROMPT = "introduce game"
@@ -78,79 +97,60 @@ const INITIALPROMPT = "introduce game"
 /*
 Local interactive game flow  (vs stateless server)
 */
-func localUIFlow(ui *GraphicalUI, loadingOldGame bool, game AdventureGame, temperature float64, imageTemperature float64, imGen ImageGenerator) error { //Run game on localhost screen with flow. Not web ui with stateless
-	var errUser error
-	userInput := INITIALPROMPT //Starting query, not printing on ui, part of system prompt getting started
-
-	if loadingOldGame {
-		last := game.PromptEntries[len(game.PromptEntries)-1]
-		if last.Type == PROMPTTYPE_DM {
-			userInput = "" //Nope... loaded game wait input
+func localUIFlow(ui *GraphicalUI, game AdventureGame, temperature float64, imageTemperature float64, imGen *ImageGenerator) error { //Run game on localhost screen with flow. Not web ui with stateless
+	if len(game.Pages) == 0 { //New game, create first page
+		ui.SetGenerating("Running LLM first time....")
+		ui.Render()
+		errInitial := game.UserInteraction(temperature, imageTemperature, "")
+		if errInitial != nil {
+			return errInitial
 		}
-		//get pic and latest text
-		txt := game.promptFormatter.ExtractText(PLAYER, DUNGEONMASTER, last.Text)
-		fmt.Printf("\n\nEXTRACTED TEXT IS\n%s\n\n", txt)
-
-		ui.SetDungeonMasterText(txt)
-		ui.SetImagePromptText(last.PictureDescription) //Just set for debug?
-		ui.SetPicture(last.PictureFileName)
 	}
+	last := game.Pages[len(game.Pages)-1]
+
+	if !game.Textmode {
+		ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last) //menucpicture is the last or menupicture if no latest pic
+		ui.SetGenerating("Generating picture...")
+		ui.Render()
+		imgGenErr := game.GenerateLatestPicture(imageTemperature, imGen)
+		if imgGenErr != nil {
+			return imgGenErr
+		}
+	}
+	ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last) //menucpicture is the last or menupicture if no latest pic
+	ui.Render()
 
 	for {
-		if 0 < len(userInput) {
-			fmt.Printf("---process user input:%s ---\n", userInput)
-			ui.SetGenerating("Running LLM....")
-			ui.Render()
-
-			dungeonMastersays, errRun := game.UserInteraction(temperature, userInput)
-			if errRun != nil {
-				return fmt.Errorf("ERROR: Failed running game %s\n", errRun)
-			}
-			game.StoreLatestTextOutput()
-			//ui.PrintDungeonMaster(dungeonMastersays)
-			ui.SetDungeonMasterText(dungeonMastersays)
-			renderErr := ui.Render()
-			if renderErr != nil {
-				return fmt.Errorf("error rendering UI %s\n", renderErr)
-			}
-
-			ui.SetGenerating("Generating picture...")
-			ui.Render()
-			picDescription, picFileName, errPic := game.GeneratePicture(imageTemperature, dungeonMastersays, imGen)
-			if errPic != nil {
-				return fmt.Errorf("\n\nERROR generating picture:%s\n", errPic)
-			}
-			fmt.Printf("picture filename:%s\n", picFileName)
-			color.Yellow(picDescription)
-			fmt.Printf("\n\n")
-			ui.SetPicture(picFileName)
-
-			ui.SetImagePromptText(picDescription)
-			renderErr = ui.Render()
-			if renderErr != nil {
-				return fmt.Errorf("error rendering UI %s", renderErr)
-			}
-
-			errSave := game.SaveGame()
-			if errSave != nil {
-				return fmt.Errorf("error saving game %s", errSave)
-			}
-		}
 		fmt.Printf("--get user input--\n")
-		userInput, errUser = ui.GetPrompt()
+		userInput, errUser := ui.GetPrompt()
 		if errUser != nil {
 			fmt.Printf("\n\nExit by %s\n\n", errUser)
 			break
 		}
-		userInput = strings.TrimSpace(userInput)
+		fmt.Printf("---process user input:%s ---\n", userInput)
+		ui.SetGenerating("Running LLM....")
+		ui.Render()
 
-		updated, errUpdate := game.CheckOutputChanges()
-		if errUpdate != nil {
-			return fmt.Errorf("\n\nERR %s\n", errUpdate)
+		errRun := game.UserInteraction(temperature, imageTemperature, userInput)
+		if errRun != nil {
+			return fmt.Errorf("ERROR: Failed running game: %s\n", errRun)
 		}
-		if updated {
-			fmt.Printf("\n\nUSER UPDATED PROMPT!!\n")
+		last := game.Pages[len(game.Pages)-1]
+
+		if !game.Textmode {
+			ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last)
+			ui.SetGenerating("Generating picture...")
+			ui.Render()
+			imgGenErr := game.GenerateLatestPicture(imageTemperature, imGen)
+			if imgGenErr != nil {
+				return imgGenErr
+			}
 		}
+		last = game.Pages[len(game.Pages)-1]
+		ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last)
+		ui.SetGenerating("Generating picture...")
+		ui.Render()
+
 	}
 	return nil
 }
