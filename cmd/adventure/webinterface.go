@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	b64 "encoding/base64"
 
@@ -126,6 +127,10 @@ func PromptEntryToHtml(gameTitle string, savedir string, page AdventurePage, thi
 		sb.WriteString("</div>\n\n")
 	}
 
+	sb.WriteString(fmt.Sprintf("<details><summary>Summary</summary><pre>%s</pre></details>\n", page.Summary))
+	sb.WriteString("<br>\n")
+	sb.WriteString(fmt.Sprintf("<details><summary>PicturePrompt</summary><pre>%s</pre></details>\n", page.PictureDescription))
+
 	sb.WriteString("</body>\n</html>\n")
 	return sb.String()
 }
@@ -214,10 +219,14 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 		pageNumber := min(int(pageNumberPar), len(game.Pages)-1)
 		page := game.Pages[pageNumber]
 
-		errCreatePic := CreatePngIfNotFound(*imGen, path.Join(game.GetSaveDir(), page.PictureFileName()), page.PictureDescription)
-		if errCreatePic != nil {
-			c.Error(fmt.Errorf("error creating png %s", errCreatePic))
-			return
+		if !game.Textmode {
+			tImageCreateStart := time.Now() //aftertought TODO REFACTOR
+			errCreatePic := CreatePngIfNotFound(*imGen, path.Join(game.GetSaveDir(), page.PictureFileName()), page.PictureDescription)
+			if errCreatePic != nil {
+				c.Error(fmt.Errorf("error creating png %s", errCreatePic))
+				return
+			}
+			page.GenerationTimes.Picture = int(time.Since(tImageCreateStart).Milliseconds())
 		}
 
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(PromptEntryToHtml(game.GameName, game.GetSaveDir(), page, pageNumber, len(game.Pages))))

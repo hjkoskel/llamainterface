@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"llamainterface"
+	"math"
 	"os"
 	"path"
 	"strings"
@@ -108,7 +109,8 @@ func GameJsonToCatalogueEntry(fname string, llama *llamainterface.LLamaServer) (
 	labeltext := "New:" + g.GameName
 	if 0 < len(g.Pages) {
 		gametime = g.Pages[len(g.Pages)-1].Timestamp
-		labeltext = fmt.Sprintf("%s n:%v %s", g.GameName, len(g.Pages), time.Since(gametime))
+		sinceLastPlay := time.Duration(math.Floor(time.Since(gametime).Seconds())) * time.Second
+		labeltext = fmt.Sprintf("%s n:%v %s", g.GameName, len(g.Pages), sinceLastPlay)
 	}
 
 	return GameCatalogueEntry{

@@ -21,6 +21,8 @@ import (
 	"github.com/hjkoskel/bindstablediff"
 )
 
+const SUMMARIZEPROMPT = "summarize what have happend so far, where player is located and details with current inventory and what deals or quests are still to be done and what persons are met or what clues are found"
+
 //var promptFormatter PromptFormatter //Common formatter... TODO make switchable if using other models
 
 const (
@@ -109,11 +111,15 @@ func (p *AdventureGame) WriteBlankFile(fname string) error {
 	return os.WriteFile(fname, byt, 0666)
 }
 
+const MDFILENOTIFICATION = "This is game printout made by [LLM adventure game prototype, https://github.com/hjkoskel/llamainterface/tree/main/cmd/adventure](https://github.com/hjkoskel/llamainterface/tree/main/cmd/adventure)"
+
 // Writes game to disk markdown?
 func (p *AdventureGame) SaveGame() error {
 	var sb strings.Builder
+	sb.WriteString(MDFILENOTIFICATION + "\n\n# " + p.GameName + "\n" + p.Introprompt + "\n")
 
-	for _, page := range p.Pages {
+	for i, page := range p.Pages {
+		sb.WriteString(fmt.Sprintf("\n# %v\n", i+1))
 		sb.WriteString(page.ToMarkdown())
 	}
 
@@ -133,11 +139,55 @@ func (p *AdventureGame) SaveGame() error {
 }
 
 func (p *AdventureGame) GenerateLatestPicture(temperature float64, imGen *ImageGenerator) error {
+	if p.Textmode {
+		return nil
+	}
 	if len(p.Pages) == 0 {
 		return fmt.Errorf("no pages")
 	}
 	last := p.Pages[len(p.Pages)-1]
-	return CreatePngIfNotFound(*imGen, path.Join(p.GetSaveDir(), last.PictureFileName()), last.PictureDescription)
+	tImageCreateStart := time.Now() //aftertought TODO REFACTOR
+	errCreate := CreatePngIfNotFound(*imGen, path.Join(p.GetSaveDir(), last.PictureFileName()), last.PictureDescription)
+	p.Pages[len(p.Pages)-1].GenerationTimes.Picture = int(time.Since(tImageCreateStart).Milliseconds())
+	return errCreate
+}
+
+func (p *AdventureGame) CalcImagePrompt(inputText string, temperature float64) (string, error) {
+	//---- TODO add separate...
+	imGenPrompt, errImGenPrompt := p.Artist.GetLLMMEssages(inputText)
+	if errImGenPrompt != nil {
+		return "", fmt.Errorf("failed GetLLMessages for artist err:%s", errImGenPrompt)
+	}
+
+	//Lets generate text prompt. Even when playing text mode, better to have at least for debug and prompt text development
+	queryImPromptGen := gameBasicQuery(p.promptFormatter)
+	queryImPromptGen.Temperature = temperature
+	var errImGenMessage error
+
+	queryImPromptGen.Prompt, errImGenMessage = p.promptFormatter.ToPrompt(imGenPrompt)
+	if errImGenMessage != nil {
+		return "", errImGenMessage
+	}
+
+	postImgResp, errImgPost := p.llama.PostCompletion(queryImPromptGen, nil, TIMEOUTCOMPLETION)
+	if errImgPost != nil {
+		return "", errImgPost
+	}
+
+	return p.promptFormatter.Cleanup(postImgResp.Content), nil
+}
+
+func (p *AdventureGame) CalcAllImagePrompts(temperature float64) error {
+	for i, page := range p.Pages {
+		tCalcStart := time.Now() //Added as aftertought TODO refactor
+		picDesc, errCalcImagePrompt := p.CalcImagePrompt(page.Text, temperature)
+		if errCalcImagePrompt != nil {
+			return errCalcImagePrompt
+		}
+		p.Pages[i].GenerationTimes.PicturePrompt = int(time.Since(tCalcStart).Milliseconds())
+		p.Pages[i].PictureDescription = picDesc
+	}
+	return nil
 }
 
 /*
@@ -170,16 +220,17 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 	}
 
 	fmt.Printf("\n\nUSER INTERACTION MESSAGES : %#v\n\n", messages)
-	messages = append(messages, llamainterface.LLMMessage{Type: DUNGEONMASTER})
+	promptMessages := append(messages, llamainterface.LLMMessage{Type: DUNGEONMASTER})
 	var errToPrompt error
 
-	query.Prompt, errToPrompt = p.promptFormatter.ToPrompt(messages)
+	query.Prompt, errToPrompt = p.promptFormatter.ToPrompt(promptMessages)
 	if errToPrompt != nil {
 		return errToPrompt
 	}
 
 	color.Blue(fmt.Sprintf("\nUSE PROMPT: %s\n", query.Prompt))
 
+	tCompletionStart := time.Now()
 	postResp, errPost := p.llama.PostCompletion(query, nil, TIMEOUTCOMPLETION)
 	if errPost != nil {
 		return errPost
@@ -189,16 +240,6 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 	color.Magenta(fmt.Sprintf("PROMPT RESPONSE IS %s\n", respText))
 	msg := p.promptFormatter.Cleanup(respText)
 	fmt.Printf("---after parsing---\n")
-	/*
-		respMessages, errRespParse := p.promptFormatter.Parse(respText)
-		if errRespParse != nil {
-			return errRespParse
-		}
-		fmt.Printf("Messages %v on response %#v\n", len(respMessages), respMessages)
-		msg := respMessages[len(respMessages)-1]
-		if msg.Type != DUNGEONMASTER {
-			return fmt.Errorf("Internal error parsed response is not dungeon master %#v", respMessages)
-		}*/
 
 	nextPage := AdventurePage{
 		Text:               msg,
@@ -209,32 +250,48 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 		//PictureFileName    string //without path?  generate on fly
 		Timestamp: time.Now(),
 	}
+	nextPage.GenerationTimes.MainLLM = int(time.Since(tCompletionStart).Milliseconds())
 
-	imGenPrompt, errImGenPrompt := p.Artist.GetLLMMEssages(nextPage.Text)
-	if errImGenPrompt != nil {
-		return fmt.Errorf("failed GetLLMessages for artist err:%s", errImGenPrompt)
+	//---- TODO add separate...
+	var errCalcImagePrompt error
+	tStartImageCalc := time.Now() //TODO added as aftertough Think better, refactor
+	nextPage.PictureDescription, errCalcImagePrompt = p.CalcImagePrompt(nextPage.Text, temperature)
+	if errCalcImagePrompt != nil {
+		return errCalcImagePrompt
 	}
-
-	//Lets generate text prompt. It is fast
-	queryImPromptGen := gameBasicQuery(p.promptFormatter)
-	queryImPromptGen.Temperature = temperature
-	var errImGenMessage error
-
-	queryImPromptGen.Prompt, errImGenMessage = p.promptFormatter.ToPrompt(imGenPrompt)
-	if errImGenMessage != nil {
-		return errImGenMessage
-	}
-
-	color.Cyan("\n----IMGEN prompt----\n%s\n----------\n", queryImPromptGen.Prompt)
-
-	postImgResp, errImgPost := p.llama.PostCompletion(queryImPromptGen, nil, TIMEOUTCOMPLETION)
-	if errImgPost != nil {
-		return errImgPost
-	}
-	nextPage.PictureDescription = postImgResp.Content
+	nextPage.GenerationTimes.PicturePrompt = int(time.Since(tStartImageCalc).Milliseconds())
 
 	color.Cyan("\n----ART PROMPT----\n%s\n----------\n", nextPage.PictureDescription)
 
+	//Create summary
+	querySummary := gameBasicQuery(p.promptFormatter)
+	querySummary.Temperature = temperature
+	var errGenSummaryPrompt error
+
+	summarizeMessages := append(messages,
+		llamainterface.LLMMessage{Type: DUNGEONMASTER})
+	if len(messages) <= 2 {
+		summarizeMessages = append(messages,
+			llamainterface.LLMMessage{Type: PLAYER, Content: SUMMARIZEPROMPT},
+			llamainterface.LLMMessage{Type: DUNGEONMASTER})
+	} else {
+		summarizeMessages[len(summarizeMessages)-2].Content = SUMMARIZEPROMPT //Instead of user
+	}
+
+	querySummary.Prompt, errGenSummaryPrompt = p.promptFormatter.ToPrompt(summarizeMessages)
+	if errGenSummaryPrompt != nil {
+		return errGenSummaryPrompt
+	}
+
+	color.Green("\n---SUMMARY PROMPT----\n%s\n--------------\n\n", querySummary.Prompt)
+
+	tSummaryCompletionStart := time.Now()
+	postSummaryResp, errSummaryPost := p.llama.PostCompletion(querySummary, nil, TIMEOUTCOMPLETION)
+	if errSummaryPost != nil {
+		return errSummaryPost
+	}
+	nextPage.Summary = p.promptFormatter.Cleanup(postSummaryResp.Content)
+	nextPage.GenerationTimes.Summary = int(time.Since(tSummaryCompletionStart).Milliseconds())
 	p.Pages = append(p.Pages, nextPage)
 
 	return p.SaveGame()
@@ -321,7 +378,8 @@ func main() {
 	pTempImageTextPrompt := flag.Float64("tip", 0.7, "temperature of imagePrompt prompt")
 
 	pTextMode := flag.Bool("tm", false, "use text mode, do not generate new in game pictures") //For faster gaming
-
+	pGenMissingImg := flag.Bool("gmi", false, "generate missing images on load or re-run creare picturepicture prompts when prompt is empty")
+	pResetPicturePrompts := flag.Bool("rpp", false, "reset picture prompts from specific game")
 	//TODO start from json  with -load at all times. These were just for bootstrapping
 	//pGameFile := flag.String("f", "firetopadventure.txt", "uses this file as system prompt. This is what you want to play")
 	//pArtistBaseTextFile := flag.String("ab", "promptArtist.txt", "prompt for generating image prompts from dungeon master text")
@@ -339,7 +397,8 @@ func main() {
 
 	pUiPort := flag.Int("uip", 2222, "web ui port")
 
-	pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/sd-v1-4-ggml-model-f16.bin", "diffusion model file")
+	pDiffusionModelFile := flag.String("dmf", "", "diffusion model file")
+	//pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/sd-v1-4-ggml-model-f16.bin", "diffusion model file")
 	//pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/HassanBlend1.5-ggml-model-q4_1.bin", "diffusion model file")
 
 	pFluxHost := flag.String("fh", "127.0.0.1", "hostname of flux.1 server")
@@ -490,6 +549,36 @@ func main() {
 	game.llama = llama
 
 	game.Textmode = *pTextMode
+
+	if *pResetPicturePrompts {
+		errReset := game.ResetPicturePrompts()
+		if errReset != nil {
+			fmt.Printf("failed resetting picture prompts err:%s\n", errReset)
+		}
+		game.RemovePicturesNotInPrompts()
+
+		errImagePromptError := game.CalcAllImagePrompts(*pTempTextPrompt)
+		if errImagePromptError != nil {
+			fmt.Printf("error calculating image prompts %s\n", errImagePromptError)
+			return
+		}
+		game.SaveGame()
+	}
+
+	if *pGenMissingImg {
+		missingPics := game.ListMissingPictures()
+		doneCounter := 0
+		for pictureFilename, imageprompt := range missingPics {
+			ui.SetGenerating(fmt.Sprintf("Generating missing pictures %v/%v : %s", doneCounter, len(missingPics), pictureFilename))
+			ui.Render()
+			errPrepare := CreatePngIfNotFound(imGen, pictureFilename, imageprompt)
+			if errPrepare != nil {
+				fmt.Printf("error generating picture %s\n", errPrepare)
+				return
+			}
+			doneCounter++
+		}
+	}
 
 	ui.SetGenerating("Starting up, wait....")
 	ui.Render()
