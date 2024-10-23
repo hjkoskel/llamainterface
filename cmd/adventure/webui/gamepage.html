@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adventure Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        #game-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        /* Styling for navigation buttons */
+        .nav-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .nav-button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+
+        .nav-button:hover {
+            background-color: #0056b3;
+        }
+
+        #game-image {
+            width: 100%;
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        #game-text {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            font-size: 18px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            text-align: left;
+        }
+
+        #command-input {
+            margin-top: 20px;
+            padding: 10px;
+            font-size: 18px;
+            width: 100%;
+            max-width: 500px;
+        }
+
+        #submit-button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+
+        #submit-button:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- Navigation buttons at the top of the page -->
+    <div class="nav-buttons">
+        <button class="nav-button" id="back-button">Back</button>
+        <button class="nav-button" id="forward-button">Forward</button>
+    </div>
+
+    <!-- Full-width image section -->
+    <img id="game-image" src="your-image-here.jpg" alt="Adventure Scene">
+
+    <!-- Game text content -->
+    <div id="game-text">
+        Welcome to the adventure game! Your journey begins here.
+        Type your commands below to proceed.
+
+        Remember, your choices matter.
+        Good luck, adventurer!
+    </div>
+
+    <!-- Command input section -->
+    <input type="text" id="command-input" placeholder="Enter your command here" />
+    <button id="submit-button">Submit</button>
+</div>
+
+<script>
+    const input = document.getElementById('command-input');
+    const submitButton = document.getElementById('submit-button');
+
+    submitButton.addEventListener('click', function() {
+        const userCommand = input.value;
+        alert('You entered: ' + userCommand);
+        input.value = ''; // Clear the input after submitting
+    });
+
+    // Optional: Press "Enter" to submit the command
+    input.addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            submitButton.click();
+        }
+    });
+
+    // Back and Forward button event handlers (you can add actual functionality later)
+    document.getElementById('back-button').addEventListener('click', function() {
+        alert('Going back...');
+        // Add functionality to go back in the game
+    });
+
+    document.getElementById('forward-button').addEventListener('click', function() {
+        alert('Going forward...');
+        // Add functionality to go forward in the game
+    });
+</script>
+
+</body>
+</html>

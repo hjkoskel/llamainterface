@@ -9,11 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
-	"net/http"
-	"net/url"
 	"os"
-	"strings"
-	"time"
 
 	"path"
 
@@ -96,44 +92,4 @@ func InitDiffusionImageGen(diffusionModelFile string, steps int, nThreads int, s
 func (p *DiffusonImageGenerator) CreatePic(prompt string) (image.Image, error) {
 	p.Pars.Prompt = prompt
 	return p.model.Txt2Img(p.Pars)
-}
-
-type FluxImageGenerator struct {
-	Host string
-	Port int
-}
-
-func (p *FluxImageGenerator) CreatePic(prompt string) (image.Image, error) {
-	u, uErr := url.JoinPath(fmt.Sprintf("http://%s:%v", p.Host, p.Port), "/generate")
-	if uErr != nil {
-		return nil, uErr
-	}
-
-	request, errRequesting := http.NewRequest("POST", u, bytes.NewBuffer([]byte(strings.ReplaceAll(prompt, "\n", " "))))
-	if errRequesting != nil {
-		return nil, errRequesting
-	}
-	request.Header.Set("Content-Type", "text/plain; charset=UTF-8")
-
-	client := &http.Client{}
-	client.Timeout = time.Minute * 10 //TODO PARAMETRIZE OR CONSTANT
-	response, errDo := client.Do(request)
-	if errDo != nil {
-		return nil, fmt.Errorf("error while flux.1 request %s", errDo.Error())
-	}
-	defer response.Body.Close()
-
-	fmt.Println("response Status:", response.Status)
-	fmt.Println("response Headers:", response.Header)
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Flux.1 generate query returned with code %s  %s ", response.StatusCode, response.Status)
-	}
-
-	return png.Decode(response.Body)
-}
-
-func InitFluxImageGen(host string, port int) (ImageGenerator, error) { //TODO instead of separate server... create flux.1 library?
-	g := &FluxImageGenerator{Host: host, Port: port}
-	return ImageGenerator(g), nil
 }

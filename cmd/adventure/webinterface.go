@@ -47,8 +47,7 @@ func RunAsWebServer(portNumber int, imGen *ImageGenerator, llama *llamainterface
 	webUi.textTemperature = textTemperature
 	webUi.imageTemperature = imageTemperature
 	if errWebUi != nil {
-		fmt.Errorf("web ui init fail %s\n", errWebUi)
-		os.Exit(-1)
+		return fmt.Errorf("web ui init fail %s", errWebUi)
 	}
 	webUiRuntimeErr := webUi.Listen(portNumber)
 	fmt.Printf("web router fail %s\n", webUiRuntimeErr)
@@ -71,9 +70,9 @@ func loadGameById(gameid string, llama *llamainterface.LLamaServer) (AdventureGa
 		return AdventureGame{}, errJsonList
 	}
 	if len(jsonList) != 1 {
-		return AdventureGame{}, fmt.Errorf("invalid number of json files on game dir %s on %s", dirname, len(jsonList))
+		return AdventureGame{}, fmt.Errorf("invalid number of json files on game dir %s on %v", dirname, len(jsonList))
 	}
-	return loadAdventure(jsonList[0], llama)
+	return loadAdventure(jsonList[0], llama, &textPromptFormatter)
 }
 
 //go:embed webui/gamepageStart.html
@@ -253,7 +252,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 		gamename := c.Param("gamename")
 		newgamefilename := path.Join(GAMESDIR, gamename+".json")
 		fmt.Printf("Going to start %s\n", newgamefilename)
-		game, errLoad := loadAdventure(newgamefilename, result.llama)
+		game, errLoad := loadAdventure(newgamefilename, result.llama, &textPromptFormatter)
 		if errLoad != nil {
 			c.Error(fmt.Errorf("internal error:%s", errLoad))
 			return

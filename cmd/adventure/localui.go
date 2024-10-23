@@ -58,29 +58,11 @@ func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface
 		return AdventureGame{}, fmt.Errorf("error catalogueing %s", catErr)
 	}
 
-	//TODO GENERATE MISSING GRAPHICS WHEN BUILDING CATALOGUE
-	/*
-		index := 0
-		for gamename, catItem := range cat {
-			index++
-			ui.generatingText = fmt.Sprintf("Generating start image %v/%v : %s", index, len(cat), catItem.Game.GameName)
-			ui.Render()
-			errPrepare := catItem.PrepareImage(imGen)
-			if errPrepare != nil {
-				fmt.Printf("failed preparing %s\n", errPrepare)
-			}
-			catItem.MenuImage = rl.LoadTexture(catItem.TitleImageFileName)
-			if catItem.MenuImage.Width == 0 || catItem.MenuImage.Height == 0 {
-				return AdventureGame{}, false, fmt.Errorf("error loading menu picture %s", catItem.MenuImage)
-			}
-			cat[gamename] = catItem
-		}*/
-
 	pickResult, errPick := ui.PickFromCatalogue(cat)
 	if errPick != nil {
 		return AdventureGame{}, fmt.Errorf("localUIGetGame: error picking %s\n", errPick)
 	}
-	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama)
+	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama, &textPromptFormatter)
 	if errGameLoad != nil {
 		return AdventureGame{}, errGameLoad
 	}

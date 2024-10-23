@@ -101,7 +101,7 @@ func ListNewGamesJson(newgameDirName string, llama *llamainterface.LLamaServer) 
 }
 
 func GameJsonToCatalogueEntry(fname string, llama *llamainterface.LLamaServer) (GameCatalogueEntry, error) {
-	g, errG := loadAdventure(fname, llama)
+	g, errG := loadAdventure(fname, llama, &textPromptFormatter)
 	if errG != nil {
 		return GameCatalogueEntry{}, fmt.Errorf("was not able to open game %s error:%s", fname, errG)
 	}
@@ -136,81 +136,3 @@ func CreateToCatalogue(filelist []string, llama *llamainterface.LLamaServer) (Ga
 	}
 	return result, nil
 }
-
-/*
-func ListSavedGames(savegamedir string, llama *llamainterface.LLamaServer) (GameCatalogue, error) {
-	result := []GameCatalogueEntry{}
-
-	saveDirContent, errDirContent := os.ReadDir(savegamedir)
-	if errDirContent != nil {
-		return GameCatalogue{}, errDirContent
-	}
-	for _, dirEntry := range saveDirContent {
-		if !dirEntry.IsDir() {
-			continue
-		}
-		//Get json from dir
-		jsonFilename := path.Join(savegamedir, dirEntry.Name())
-		jsonFileList, errListJson := getFirstJsonFilesFromDir(jsonFilename)
-		if errListJson != nil || len(jsonFileList) == 0 {
-			continue
-		}
-		if 1 < len(jsonFileList) {
-			fmt.Printf("WARNING MULTIPLE JSON FILES %#v\n", jsonFileList) //TODO HOW TO HANDLE?
-		}
-		jsonfilename := jsonFileList[0]
-
-		g, errG := loadAdventure(jsonfilename, llama)
-		if errG != nil {
-			fmt.Printf("was not able to open game %s error:%s", jsonfilename, errG)
-			continue
-		}
-
-		gametime := g.StartTime
-		if 0 < len(g.Pages) {
-			gametime = g.Pages[len(g.Pages)-1].Timestamp
-		}
-
-		//Is there title picture. If there is, load
-		result = append(result, GameCatalogueEntry{
-			TitleImageFileName: g.gameTitlepictureFilename,
-			Label:              "New:" + g.GameName,
-			GameFileName:       jsonFilename,
-			LastPlayed:         gametime,
-		})
-	}
-	sort.Sort(GameCatalogue(result)) //If there is timestamp?
-	return result, nil
-
-}
-
-// ListNewGames.. if there are no pictures of games then those are rendered after...
-func ListNewGames(newgameDirName string, llama *llamainterface.LLamaServer) (GameCatalogue, error) {
-	result := []GameCatalogueEntry{}
-
-	dirContent, errDirContent := os.ReadDir(newgameDirName)
-	if errDirContent != nil {
-		return GameCatalogue{}, errDirContent
-	}
-	for _, fileEntry := range dirContent {
-		if fileEntry.IsDir() || !strings.HasSuffix(fileEntry.Name(), ".json") {
-			continue
-		}
-		totalFilename := path.Join(newgameDirName, fileEntry.Name())
-		g, errG := loadAdventure(totalFilename, llama)
-		if errG != nil {
-			fmt.Printf("was not able to open game %s error:%s", totalFilename, errG)
-			continue
-		}
-
-		//Is there title picture. If there is, load
-		result = append(result, GameCatalogueEntry{
-			Game:               g,
-			TitleImageFileName: strings.Replace(totalFilename, ".json", ".png", 1),
-			//TitleImage     rl.Texture2D
-		})
-	}
-	sort.Sort(GameCatalogue(result)) //If there is timestamp?
-	return result, nil
-}
-*/

@@ -37,6 +37,7 @@ const (
 )
 
 const (
+	SYSTEM        = "system"
 	PLAYER        = "player"
 	DUNGEONMASTER = "dungeonmaster"
 )
@@ -190,6 +191,54 @@ func (p *AdventureGame) CalcAllImagePrompts(temperature float64) error {
 	return nil
 }
 
+func (p *AdventureGame) ExperimentRunPromptOnLatest(textInput string, temperature float64) (string, string, error) {
+	if len(p.Pages) == 0 {
+		return "", "", fmt.Errorf("no pages")
+	}
+
+	oldValue := p.Pages[len(p.Pages)-1].UserResponse //empty...
+	p.Pages[len(p.Pages)-1].UserResponse = textInput
+
+	messages, errMessages := p.GetLLMMEssages() //Gets messages, token count not going over
+	if errMessages != nil {
+		return "", "", fmt.Errorf("error getting messages %s", errMessages)
+	}
+
+	p.Pages[len(p.Pages)-1].UserResponse = oldValue //recover
+
+	promptMessages := append(messages, llamainterface.LLMMessage{Type: DUNGEONMASTER})
+
+	query := gameBasicQuery(p.promptFormatter)
+	query.Temperature = temperature
+
+	var errToPrompt error
+
+	query.Prompt, errToPrompt = p.promptFormatter.ToPrompt(promptMessages)
+	if errToPrompt != nil {
+		return query.Prompt, "", fmt.Errorf("to promt fail %s", errToPrompt)
+	}
+
+	postResp, errPost := p.llama.PostCompletion(query, nil, TIMEOUTCOMPLETION)
+	if errPost != nil {
+		return query.Prompt, "", errPost
+	}
+	return query.Prompt, p.promptFormatter.Cleanup(postResp.Content), nil
+}
+
+func cleanupForJSONlist(s string) string {
+	s = strings.ReplaceAll(s, "`", "")
+	startIndex := strings.Index(s, "[")
+	endIndex := strings.LastIndex(s, "]")
+
+	if startIndex < 0 || endIndex < 0 {
+		return s
+	}
+	if endIndex <= startIndex {
+		return s
+	}
+	return s[startIndex : endIndex+1]
+}
+
 /*
 One mega function, advance game state.
 */
@@ -253,15 +302,18 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 	nextPage.GenerationTimes.MainLLM = int(time.Since(tCompletionStart).Milliseconds())
 
 	//---- TODO add separate...
-	var errCalcImagePrompt error
-	tStartImageCalc := time.Now() //TODO added as aftertough Think better, refactor
-	nextPage.PictureDescription, errCalcImagePrompt = p.CalcImagePrompt(nextPage.Text, temperature)
-	if errCalcImagePrompt != nil {
-		return errCalcImagePrompt
-	}
-	nextPage.GenerationTimes.PicturePrompt = int(time.Since(tStartImageCalc).Milliseconds())
+	/*
+		TODO DEPRECATE CalcImagePrompt
 
-	color.Cyan("\n----ART PROMPT----\n%s\n----------\n", nextPage.PictureDescription)
+		var errCalcImagePrompt error
+		tStartImageCalc := time.Now() //TODO added as aftertough Think better, refactor
+		nextPage.PictureDescription, errCalcImagePrompt = p.CalcImagePrompt(nextPage.Text, temperature)
+		if errCalcImagePrompt != nil {
+			return errCalcImagePrompt
+		}
+		nextPage.GenerationTimes.PicturePrompt = int(time.Since(tStartImageCalc).Milliseconds())
+		color.Cyan("\n----ART PROMPT----\n%s\n----------\n", nextPage.PictureDescription)
+	*/
 
 	//Create summary
 	querySummary := gameBasicQuery(p.promptFormatter)
@@ -293,6 +345,39 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 	nextPage.Summary = p.promptFormatter.Cleanup(postSummaryResp.Content)
 	nextPage.GenerationTimes.Summary = int(time.Since(tSummaryCompletionStart).Milliseconds())
 	p.Pages = append(p.Pages, nextPage)
+
+	var errCalcImagePrompt error
+	tStartImageCalc := time.Now() //TODO added as aftertough Think better, refactor
+
+	//HACK! todo refactor this art thing to somewhere else!
+	_, responseSceneJson, errRespScene := p.ExperimentRunPromptOnLatest(PROMPT_GETSCENERY, temperature)
+	if errRespScene != nil {
+		return errRespScene
+	}
+
+	//responseSceneJson = cleanupForJSONlist(responseSceneJson)
+	nextPage.SceneSummary = responseSceneJson
+
+	color.Yellow("\n----GOT SCENERY----\n%s\n----------\n", nextPage.SceneSummary)
+
+	sceneKeyValues := GetKeyValuePairs(nextPage.SceneSummary)
+
+	scene := sceneKeyValues.ToSceneryOutput() //Parse even hallunizated json
+
+	if len(scene) == 0 {
+		fmt.Printf("Scene parsing FAIL, fallback")
+		//Try something! Fallback to old
+		nextPage.PictureDescription, errCalcImagePrompt = p.CalcImagePrompt(nextPage.Text, temperature)
+		if errCalcImagePrompt != nil {
+			return errCalcImagePrompt
+		}
+	} else {
+		nextPage.PictureDescription = strings.TrimSpace(p.Artist.Prefix + " " + scene.String() + " " + p.Artist.Suffix)
+	}
+	nextPage.GenerationTimes.PicturePrompt = int(time.Since(tStartImageCalc).Milliseconds())
+
+	color.Cyan("\n----ART PROMPT----\n%s\n----------\n", nextPage.PictureDescription)
+	p.Pages[len(p.Pages)-1] = nextPage //RE set  TODO HACK!  REFACTOR when know that this is good idea to generate prompts for art
 
 	return p.SaveGame()
 }
@@ -369,6 +454,38 @@ func InitLLM(llamafilename string, llamaport int, llamamodelfile string, serverH
 	return &llama, nil
 }
 
+func writePromptResults(promptListFileName string, outputfileName string, g *AdventureGame, temperature float64) error {
+	byt, errRead := os.ReadFile(promptListFileName)
+	if errRead != nil {
+		return errRead
+	}
+	rows := strings.Split(string(byt), "\n")
+
+	var sb strings.Builder //Build markdown
+	for runIndex, row := range rows {
+		row = strings.TrimSpace(row)
+		if len(row) == 0 {
+			continue
+		}
+		if strings.HasPrefix(row, "#") { //Comment out
+			continue
+		}
+		completeQuery, response, errResp := g.ExperimentRunPromptOnLatest(row, temperature)
+		if errResp != nil {
+			return errResp
+		}
+		sb.WriteString(fmt.Sprintf("# query%v\n", runIndex))
+		sb.WriteString(row + "\n")
+		sb.WriteString("~~~ \n")
+		sb.WriteString(completeQuery)
+		sb.WriteString("~~~ \n")
+		sb.WriteString(response + "\n")
+	}
+	return os.WriteFile(outputfileName, []byte(sb.String()), 0666)
+}
+
+var textPromptFormatter llamainterface.PromptFormatter
+
 func main() {
 	pLoadFile := flag.String("load", "", "load existing game from json and continue")
 	pBrancToNewGame := flag.Bool("b", false, "branch new game from loadfile")
@@ -394,7 +511,7 @@ func main() {
 	pServerHost := flag.String("h", "127.0.0.1", "llama.cpp server host")
 	//pServerPort := flag.Int("p", 8080, "llama.cpp server port")
 	pllmPort := flag.Int("p", 8080, "llama.cpp or lllamafile server port. 0 for kernel decides for llamafile")
-
+	pPromptFormatterName := flag.String("pf", llamainterface.PROMPTFORMAT_LLAMA31, fmt.Sprintf("formatter name:%v", llamainterface.AllowedPromptFormatterNames()))
 	pUiPort := flag.Int("uip", 2222, "web ui port")
 
 	pDiffusionModelFile := flag.String("dmf", "", "diffusion model file")
@@ -406,10 +523,20 @@ func main() {
 
 	//For generating new adventures
 	pCreateBlank := flag.String("blank", "", "Create blank game file as example from this for creating new adventure games")
+
+	pRunOnLatest := flag.String("rol", "", "filename of text file, one query per row. Run on latest and produce out_filename as result. Used for development")
+
 	flag.Parse()
 
 	if len(*pLlamafile) == 0 && *pllmPort == 0 {
 		fmt.Printf("llama port must be defined when not starting llamafile from executable")
+		return
+	}
+
+	var errFormatterName error
+	textPromptFormatter, errFormatterName = llamainterface.ParsePromptFormatter(*pPromptFormatterName, SYSTEM, []string{PLAYER}, DUNGEONMASTER)
+	if errFormatterName != nil {
+		fmt.Printf("formatter name error:%s\n", errFormatterName)
 		return
 	}
 
@@ -462,6 +589,7 @@ func main() {
 	/************************
 	** Initialize LLM model
 	*************************/
+
 	llama, errllama := InitLLM(*pLlamafile, *pllmPort, *pLlamafileModel, *pServerHost)
 	if errllama != nil {
 		fmt.Printf("error starting llm %s\n", errllama)
@@ -502,24 +630,29 @@ func main() {
 	* Start local ui *
 	******************/
 	fmt.Printf("\n\n\n--STARTING UI--\n\n")
-	ui, errUi := localUIStart()
-	if errUi != nil {
-		fmt.Printf("%s\n", errUi)
-		return
+	var ui *GraphicalUI
+	if len(*pRunOnLatest) == 0 || len(*pLoadFile) == 0 {
+		var errUi error
+		ui, errUi = localUIStart()
+		if errUi != nil {
+			fmt.Printf("%s\n", errUi)
+			return
+		}
 	}
 
 	/****************
 	* Get local game
 	*****************/
 	var game AdventureGame
-	game.promptFormatter = &llamainterface.Llama3InstructFormatter{System: "system", Users: []string{"player"}, Assistant: "dungeonmaster"} //TODO choose and support other formats
+
+	game.promptFormatter = textPromptFormatter
 
 	if 0 < len(*pLoadFile) {
 		// TODO PÄÄOHJELMAAN JOS KOMENTORIVI ARGUMENTILLA
 
 		fmt.Printf("\n--- Loading:%s ---\n\n", *pLoadFile)
 		var errGameInit error
-		game, errGameInit = loadAdventure(*pLoadFile, llama)
+		game, errGameInit = loadAdventure(*pLoadFile, llama, &textPromptFormatter)
 		if errGameInit != nil {
 			fmt.Printf("err game load from %s err:%s\n", *pLoadFile, errGameInit)
 			return
@@ -547,8 +680,19 @@ func main() {
 	}
 
 	game.llama = llama
-
 	game.Textmode = *pTextMode
+
+	if 0 < len(*pRunOnLatest) {
+		fOutName := "out_" + *pRunOnLatest + ".md"
+		errWrite := writePromptResults(*pRunOnLatest, fOutName, &game, *pTempTextPrompt)
+		fmt.Printf("\n\n---- RUNNED ON LATEST (file:%s) ----\n", *pRunOnLatest)
+		if errWrite != nil {
+			fmt.Printf("FAIL %s\n", errWrite)
+			return
+		}
+		fmt.Printf("Wrote responses to %s\n\n", fOutName)
+		return
+	}
 
 	if *pResetPicturePrompts {
 		errReset := game.ResetPicturePrompts()

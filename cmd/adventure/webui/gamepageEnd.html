@@ -1,0 +1,31 @@
+<script>
+    const input = document.getElementById('command-input');
+    const submitButton = document.getElementById('submit-button');
+
+    submitButton.addEventListener('click', function() {
+        const userCommand = input.value;
+        alert('You entered: ' + userCommand);
+        input.value = ''; // Clear the input after submitting
+    });
+
+    // Optional: Press "Enter" to submit the command
+    input.addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            submitButton.click();
+        }
+    });
+
+    // Back and Forward button event handlers (you can add actual functionality later)
+    document.getElementById('back-button').addEventListener('click', function() {
+        alert('Going back...');
+        // Add functionality to go back in the game
+    });
+
+    document.getElementById('forward-button').addEventListener('click', function() {
+        alert('Going forward...');
+        // Add functionality to go forward in the game
+    });
+</script>
+
+</body>
+</html>

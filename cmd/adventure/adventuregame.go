@@ -10,16 +10,27 @@ import (
 	"time"
 )
 
+type CalcStatistics struct { //Track performance of gaming system
+	MainLLM       int //all are in milliseconds for json marshaling
+	Summary       int
+	PicturePrompt int
+	Picture       int
+} //Instead of map, use struct. More controlled
+
 type AdventurePage struct {
 	Text         string
 	UserResponse string
 	Summary      string //Summarizes what have happend since start
+
+	SceneSummary string //SceneryOutput //Image prompt is based on this.  Store as text so it is possible to make "json cleaner" methods!
 
 	TokenCount int //Tokenizing is cheap and depends on model. Better NOT TO SAVE tokens, omitempty
 
 	PictureDescription string
 	//PictureFileName    string //without path?  generate on fly
 	Timestamp time.Time //Nice to have information, used for generating pictures
+
+	GenerationTimes CalcStatistics
 }
 
 func (p *AdventurePage) ToMarkdown() string {
@@ -70,6 +81,50 @@ type AdventureGame struct {
 
 const TIMEOUTTOKENIZE time.Duration = time.Second * 120
 const TIMEOUTCOMPLETION time.Duration = time.Minute * 15
+
+func (p *AdventureGame) ResetPicturePrompts() error {
+	for pagenumber, _ := range p.Pages {
+		p.Pages[pagenumber].PictureDescription = ""
+	}
+	return p.SaveGame()
+}
+
+func (p *AdventureGame) ListMissingPicturePrompts() []int { //For calculating ammount
+	result := []int{}
+	for i, page := range p.Pages {
+		if len(page.PictureDescription) == 0 {
+			result = append(result, i)
+		}
+	}
+	return result
+}
+
+func (p *AdventureGame) RemovePicturesNotInPrompts() {
+	for _, page := range p.Pages {
+		fname := path.Join(p.GetSaveDir(), page.PictureFileName())
+		if page.PictureDescription == "" {
+			os.Remove(fname)
+		}
+	}
+}
+
+// List filename and prompt from all pages.
+func (p *AdventureGame) ListMissingPictures() map[string]string {
+	result := make(map[string]string)
+
+	for _, page := range p.Pages {
+		fname := path.Join(p.GetSaveDir(), page.PictureFileName())
+		if page.PictureDescription == "" {
+			os.Remove(fname)
+		}
+
+		_, errLoad := LoadPng(fname)
+		if errLoad != nil { //Got error
+			result[fname] = page.PictureDescription
+		}
+	}
+	return result
+}
 
 func (p *AdventureGame) getIntroPromptMessages() []llamainterface.LLMMessage {
 	return llamainterface.LLMMessages{
@@ -136,7 +191,7 @@ func (p *AdventureGame) CalcTokensMissing() error {
 }
 
 // loadAdventure Continues existing adventure... OR starts from empty?
-func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer) (AdventureGame, error) {
+func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promptformatter *llamainterface.PromptFormatter) (AdventureGame, error) {
 	byt, readErr := os.ReadFile(loadGameFile)
 	if readErr != nil {
 		return AdventureGame{}, fmt.Errorf("error reading savegame %s  err:%s", loadGameFile, readErr)
@@ -149,7 +204,7 @@ func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer) (Adve
 	if result.StartTime.Unix() < 1000 {
 		result.StartTime = time.Now()
 	}
-	result.promptFormatter = &llamainterface.Llama3InstructFormatter{System: "system", Users: []string{"player"}, Assistant: "dungeonmaster"} // Llama31Formatter{} //TODO:Not need to other formatters?
+	result.promptFormatter = *promptformatter // &llamainterface.Llama3InstructFormatter{System: "system", Users: []string{"player"}, Assistant: "dungeonmaster"}
 	result.llama = llama
 	errTok := result.CalcTokensMissing() //Assuming that does not take long. Tokenization is fast
 	if errTok != nil {
