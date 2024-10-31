@@ -23,17 +23,24 @@ stable-diffussion.cpp have negative prompt
 https://github.com/leejet/stable-diffusion.cpp/blob/master/docs/flux.md
 https://github.com/leejet/stable-diffusion.cpp/blob/master/examples/cli/main.cpp
 
+Acutal server:
+https://github.com/stduhpf/stable-diffusion.cpp/tree/server
+
+
 */
 
 package main
 
 import (
 	"bytes"
+	b64 "encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/png"
+	"io"
+	"math/rand"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -84,24 +91,137 @@ type DiffusersImageGenParameters struct{
 }
 */
 
-// --------- image generator
+type SampleMethod string
 
-type FluxImageGenerator struct {
-	Host string
-	Port int
+const (
+	EULER_A   SampleMethod = "euler_a"
+	EULER     SampleMethod = "euler"
+	HEUN      SampleMethod = "heun"
+	DPM2      SampleMethod = "dpm2"
+	DPMPP2S_A SampleMethod = "dpm++2s_a"
+	DPMPP2M   SampleMethod = "dpm++2m"
+	DPMPP2Mv2 SampleMethod = "dpm++2mv2"
+	LCM       SampleMethod = "lcm"
+)
+
+func ListAllSamplingMethods() []string {
+	return []string{"euler_a", "euler", "heun", "dpm2", "dpm++2s_a", "dpm++2m", "dpm++2mv2", "lcm"}
 }
 
-func (p *FluxImageGenerator) CreatePic(prompt string) (image.Image, error) {
-	u, uErr := url.JoinPath(fmt.Sprintf("http://%s:%v", p.Host, p.Port), "/generate")
-	if uErr != nil {
-		return nil, uErr
-	}
+type StableDiffusionCppParameters struct {
+	Prompt         string       `json:"prompt"`
+	NegativePrompt string       `json:"negative_prompt"`
+	ClipSkip       int          `json:"clip_skip"` //-1
+	CfgScale       float64      `json:"cfg_scale"` //7.0
+	Guidance       float64      `json:"guidance"`
+	Width          int          `json:"width"`
+	Height         int          `json:"height"`
+	SampleMethod   SampleMethod `json:"sample_method"`
+	SampleSteps    int          `json:"sample_steps"`
+	Seed           int          `json:"seed"`
+	BatchCount     int          `json:"batch_count"` //1 is default
+	NormalizeInput bool         `json:"normalize_input"`
+}
 
-	request, errRequesting := http.NewRequest("POST", u, bytes.NewBuffer([]byte(strings.ReplaceAll(prompt, "\n", " "))))
+func (p *StableDiffusionCppParameters) SetSampleMethod(m string) error {
+	s := strings.ToLower(m)
+	lst := ListAllSamplingMethods()
+	for _, v := range lst {
+		if v == s {
+			p.SampleMethod = SampleMethod(s)
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown sample method %s", m)
+}
+
+func DefaultStableDiffusionCppParameters() StableDiffusionCppParameters {
+	return StableDiffusionCppParameters{
+		Prompt:         "",
+		NegativePrompt: "",
+		ClipSkip:       -1,
+		CfgScale:       7.0,
+		Guidance:       3.5,
+		Width:          512,
+		Height:         512,
+		SampleMethod:   EULER_A,
+		SampleSteps:    20,
+		BatchCount:     1,
+		NormalizeInput: false}
+}
+
+/*
+IDEA: query is universal
+*/
+func (p *StableDiffusionCppParameters) ToJSON() string {
+	d := DefaultStableDiffusionCppParameters()
+	pieces := []string{fmt.Sprintf("\"prompt\":%#v", p.Prompt)}
+
+	if 0 < len(p.NegativePrompt) {
+		pieces = append(pieces, fmt.Sprintf("\"negative_prompt\":%#v", p.NegativePrompt))
+	}
+	if d.ClipSkip != p.ClipSkip {
+		pieces = append(pieces, fmt.Sprintf("\"clip_skip\":%#v", p.ClipSkip))
+	}
+	if d.CfgScale != p.CfgScale {
+		pieces = append(pieces, fmt.Sprintf("\"cfg_scale\":%#v", p.CfgScale))
+	}
+	if d.Guidance != p.Guidance {
+		pieces = append(pieces, fmt.Sprintf("\"guidance\":%#v", p.Guidance))
+	}
+	if d.Width != p.Width {
+		pieces = append(pieces, fmt.Sprintf("\"width\":%#v", p.Width))
+	}
+	if d.Height != p.Height {
+		pieces = append(pieces, fmt.Sprintf("\"height\":%#v", p.Height))
+	}
+	if d.SampleMethod != p.SampleMethod {
+		pieces = append(pieces, fmt.Sprintf("\"sample_method\":%#v", p.SampleMethod))
+	}
+	if p.Seed != 0 {
+		pieces = append(pieces, fmt.Sprintf("\"seed\":%#v", p.Seed))
+	}
+	if d.SampleSteps != p.SampleSteps {
+		pieces = append(pieces, fmt.Sprintf("\"sample_steps\":%#v", p.SampleSteps))
+		pieces = append(pieces, fmt.Sprintf("\"steps\":%#v", p.SampleSteps))
+		pieces = append(pieces, fmt.Sprintf("\"sampling_steps", p.SampleSteps))
+	}
+	if d.BatchCount != p.BatchCount {
+		pieces = append(pieces, fmt.Sprintf("\"batch_count\":%#v", p.BatchCount))
+	}
+	if d.NormalizeInput != p.NormalizeInput {
+		pieces = append(pieces, fmt.Sprintf("\"normalize_input\":%#v", p.NormalizeInput))
+	}
+	return "{" + strings.Join(pieces, ",") + "}"
+}
+
+type FluxImageGenerator struct {
+	Url        string
+	Parameters StableDiffusionCppParameters //Set on program start
+}
+
+type Txt2ImgResponse struct {
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Channel  int    `json:"channel"`
+	Data     string `json:"data"`
+	Encoding string `json:"encoding"`
+}
+
+func (p *FluxImageGenerator) CreatePic(prompt string, negativePrompt string) (image.Image, error) {
+
+	p.Parameters.Prompt = prompt
+	p.Parameters.NegativePrompt = negativePrompt
+	p.Parameters.Seed = rand.Int() //parameter?
+	//p.Parameters.Width = 1024
+	//p.Parameters.Height = 1024
+	v := p.Parameters.ToJSON()
+	fmt.Printf("Inputti %s\n", v)
+	request, errRequesting := http.NewRequest("POST", p.Url, bytes.NewBuffer([]byte(v)))
 	if errRequesting != nil {
 		return nil, errRequesting
 	}
-	request.Header.Set("Content-Type", "text/plain; charset=UTF-8")
+	request.Header.Set("Content-Type", "text/json; charset=UTF-8")
 
 	client := &http.Client{}
 	client.Timeout = time.Minute * 10 //TODO PARAMETRIZE OR CONSTANT
@@ -118,10 +238,21 @@ func (p *FluxImageGenerator) CreatePic(prompt string) (image.Image, error) {
 		return nil, fmt.Errorf("Flux.1 generate query returned with code %v  %s ", response.StatusCode, response.Status)
 	}
 
-	return png.Decode(response.Body)
-}
+	body, errBody := io.ReadAll(response.Body)
+	if errBody != nil {
+		return nil, errBody
+	}
 
-func InitFluxImageGen(host string, port int) (ImageGenerator, error) { //TODO instead of separate server... create flux.1 library?
-	g := &FluxImageGenerator{Host: host, Port: port}
-	return ImageGenerator(g), nil
+	var resp []Txt2ImgResponse
+	errUnmarshal := json.Unmarshal(body, &resp)
+	if errUnmarshal != nil {
+		return nil, errUnmarshal
+	}
+
+	baseBin, baseErr := b64.StdEncoding.DecodeString(string(resp[0].Data))
+	if baseErr != nil {
+		return nil, baseErr
+	}
+
+	return png.Decode(bytes.NewBuffer(baseBin))
 }

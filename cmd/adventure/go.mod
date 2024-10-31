@@ -6,7 +6,7 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/gen2brain/raylib-go/raylib v0.0.0-20240905170917-123ec7ae6b35
 	github.com/gin-gonic/gin v1.10.0
-	github.com/hjkoskel/bindstablediff v0.0.0-20231015140744-dc2b685d7774
+	github.com/go-playground/assert/v2 v2.2.0
 	golang.org/x/image v0.20.0
 	llamainterface v0.0.0
 )

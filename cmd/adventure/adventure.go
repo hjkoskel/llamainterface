@@ -18,7 +18,6 @@ import (
 	"llamainterface"
 
 	"github.com/fatih/color"
-	"github.com/hjkoskel/bindstablediff"
 )
 
 const SUMMARIZEPROMPT = "summarize what have happend so far, where player is located and details with current inventory and what deals or quests are still to be done and what persons are met or what clues are found"
@@ -148,7 +147,7 @@ func (p *AdventureGame) GenerateLatestPicture(temperature float64, imGen *ImageG
 	}
 	last := p.Pages[len(p.Pages)-1]
 	tImageCreateStart := time.Now() //aftertought TODO REFACTOR
-	errCreate := CreatePngIfNotFound(*imGen, path.Join(p.GetSaveDir(), last.PictureFileName()), last.PictureDescription)
+	errCreate := CreatePngIfNotFound(*imGen, path.Join(p.GetSaveDir(), last.PictureFileName()), last.PictureDescription, "")
 	p.Pages[len(p.Pages)-1].GenerationTimes.Picture = int(time.Since(tImageCreateStart).Milliseconds())
 	return errCreate
 }
@@ -497,33 +496,25 @@ func main() {
 	pTextMode := flag.Bool("tm", false, "use text mode, do not generate new in game pictures") //For faster gaming
 	pGenMissingImg := flag.Bool("gmi", false, "generate missing images on load or re-run creare picturepicture prompts when prompt is empty")
 	pResetPicturePrompts := flag.Bool("rpp", false, "reset picture prompts from specific game")
-	//TODO start from json  with -load at all times. These were just for bootstrapping
-	//pGameFile := flag.String("f", "firetopadventure.txt", "uses this file as system prompt. This is what you want to play")
-	//pArtistBaseTextFile := flag.String("ab", "promptArtist.txt", "prompt for generating image prompts from dungeon master text")
-	//pMaxTokens := flag.Int("maxtokens", 1024, "number of max tokens for LLM model")
 
-	//pLlamafile := flag.String("l", LLAMAFILENAME, ".llamafile filename, starts that file as server")
+	//LLM model
 	pLlamafile := flag.String("l", "/usr/local/bin/llamafile", ".llamafile filename, starts that file as server. Or llama-server file (then model is needed)")
-	//pLlamafile := flag.String("l", "", ".llamafile filename, starts that file as server")
-
 	pLlamafileModel := flag.String("lm", "", "use alternative .gguf model file on this llamafile instead")
-	//pLlamaport := flag.Int("lp", 0, "llamafile port, use 0 if let kernel decide port")
-	pServerHost := flag.String("h", "127.0.0.1", "llama.cpp server host")
-	//pServerPort := flag.Int("p", 8080, "llama.cpp server port")
+	pServerHost := flag.String("h", "", "llama.cpp server host")
 	pllmPort := flag.Int("p", 8080, "llama.cpp or lllamafile server port. 0 for kernel decides for llamafile")
+
 	pPromptFormatterName := flag.String("pf", llamainterface.PROMPTFORMAT_LLAMA31, fmt.Sprintf("formatter name:%v", llamainterface.AllowedPromptFormatterNames()))
-	pUiPort := flag.Int("uip", 2222, "web ui port")
+	//UI settings
+	pUiPort := flag.Int("uip", 0, "web ui port")
 
-	pDiffusionModelFile := flag.String("dmf", "", "diffusion model file")
-	//pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/sd-v1-4-ggml-model-f16.bin", "diffusion model file")
-	//pDiffusionModelFile := flag.String("dmf", "/home/henri/aimallit/stable-diffusionMuunnetut/HassanBlend1.5-ggml-model-q4_1.bin", "diffusion model file")
-
-	pFluxHost := flag.String("fh", "127.0.0.1", "hostname of flux.1 server")
-	pFluxPort := flag.Int("fp", 8800, "flux.1 server port")
+	pImageGenEndpointUrl := flag.String("igurl", "http://127.0.0.1:8800/txt2img", "image generator URL")
+	pImagGenWidth := flag.Int("igw", 1024, "image generation X-resolution")
+	pImagGenHeight := flag.Int("igh", 1024, "image generation Y-resolution")
+	pImagGenSampleSteps := flag.Int("igsteps", 20, "image generation steps, affects speed vs quality")
+	pImagGenSampler := flag.String("igsampler", "euler", fmt.Sprintf("choose sampling method [%s]", strings.Join(ListAllSamplingMethods(), ",")))
 
 	//For generating new adventures
 	pCreateBlank := flag.String("blank", "", "Create blank game file as example from this for creating new adventure games")
-
 	pRunOnLatest := flag.String("rol", "", "filename of text file, one query per row. Run on latest and produce out_filename as result. Used for development")
 
 	flag.Parse()
@@ -549,43 +540,39 @@ func main() {
 		pllmPort = &llamaport
 	}
 
-	//webUiRouter, errWebUiRouter := InitRouter()
-
 	/*******************************************
 	* Initialize model that generates pictures *
 	********************************************/
 	var imGen ImageGenerator
-	if 0 < len(*pFluxHost) {
-		var imGenErr error
-		imGen, imGenErr = InitFluxImageGen(*pFluxHost, *pFluxPort)
-		if imGenErr != nil {
-			fmt.Printf("error initializing flux.1: %s\n", imGenErr)
-			return
-		}
-	} else {
-		var imGenErr error
-		imGen, imGenErr = InitDiffusionImageGen(*pDiffusionModelFile, 15, -1, bindstablediff.DEFAULT)
-		if imGenErr != nil {
-			fmt.Printf("error initializing stable diffusion: %s\n", imGenErr)
-			return
-		}
+
+	imageGenPars := DefaultStableDiffusionCppParameters()
+
+	imageGenPars.Width = *pImagGenWidth //TODO VALIDATE valid resolution
+	imageGenPars.Height = *pImagGenHeight
+	imageGenPars.SampleSteps = *pImagGenSampleSteps
+
+	errMethod := imageGenPars.SetSampleMethod(*pImagGenSampler)
+	if errMethod != nil {
+		fmt.Printf("invalid sampling method %s\n", errMethod)
+		return
 	}
+
+	fluxgen := FluxImageGenerator{Url: *pImageGenEndpointUrl, Parameters: imageGenPars}
+	imGen = &fluxgen
 
 	/********************************
 	* Generate missing media assets *
 	*********************************/
-	errCreateTitle := CreatePngIfNotFound(imGen, TITLEPICTUREFILE, MAINTITLESCREENGRAPHICPROMPT)
+	errCreateTitle := CreatePngIfNotFound(imGen, TITLEPICTUREFILE, MAINTITLESCREENGRAPHICPROMPT, "")
 	if errCreateTitle != nil {
 		fmt.Printf("\nerror while creating title picture %s\n", errCreateTitle)
 		return
 	}
 	//Generate menu
-	errCreateMenu := CreatePngIfNotFound(imGen, MENUPICTUREFILE, MAINMENUGRAPHICPROMPT)
+	errCreateMenu := CreatePngIfNotFound(imGen, MENUPICTUREFILE, MAINMENUGRAPHICPROMPT, "")
 	if errCreateMenu != nil {
 		fmt.Printf("error creating menu pictur file %s\n", errCreateMenu)
 	}
-	//generate pictures for newgame
-
 	/************************
 	** Initialize LLM model
 	*************************/
@@ -610,7 +597,7 @@ func main() {
 	}
 	for _, catItem := range cat {
 		fmt.Printf("Generating start image %s\n", catItem.TitleImageFileName)
-		errPrepare := CreatePngIfNotFound(imGen, catItem.TitleImageFileName, catItem.TitleDescription)
+		errPrepare := CreatePngIfNotFound(imGen, catItem.TitleImageFileName, catItem.TitleDescription, "")
 		if errPrepare != nil {
 			fmt.Printf("failed preparing %s\n", errPrepare)
 			continue
@@ -715,7 +702,7 @@ func main() {
 		for pictureFilename, imageprompt := range missingPics {
 			ui.SetGenerating(fmt.Sprintf("Generating missing pictures %v/%v : %s", doneCounter, len(missingPics), pictureFilename))
 			ui.Render()
-			errPrepare := CreatePngIfNotFound(imGen, pictureFilename, imageprompt)
+			errPrepare := CreatePngIfNotFound(imGen, pictureFilename, imageprompt, "")
 			if errPrepare != nil {
 				fmt.Printf("error generating picture %s\n", errPrepare)
 				return

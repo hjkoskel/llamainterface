@@ -220,7 +220,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 
 		if !game.Textmode {
 			tImageCreateStart := time.Now() //aftertought TODO REFACTOR
-			errCreatePic := CreatePngIfNotFound(*imGen, path.Join(game.GetSaveDir(), page.PictureFileName()), page.PictureDescription)
+			errCreatePic := CreatePngIfNotFound(*imGen, path.Join(game.GetSaveDir(), page.PictureFileName()), page.PictureDescription, "")
 			if errCreatePic != nil {
 				c.Error(fmt.Errorf("error creating png %s", errCreatePic))
 				return

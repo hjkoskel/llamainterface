@@ -78,6 +78,10 @@ type GraphicalUI struct {
 
 // Splash screen.. goes to splash screen mode.
 func (p *GraphicalUI) SplashScreen(picFileName string) error {
+	if 0 < p.pic.Width {
+		rl.UnloadTexture(p.pic)
+	}
+
 	p.pic = rl.LoadTexture(picFileName)
 	if p.pic.Width == 0 || p.pic.Height == 0 {
 		return fmt.Errorf("failed loading %s as texture", picFileName)
@@ -257,6 +261,10 @@ func (p *GraphicalUI) SetPicture(picFileName string) error { //Pass thru disk.. 
 		p.pic = rl.Texture2D{}
 		return nil
 	}
+	if 0 < p.pic.Width {
+		rl.UnloadTexture(p.pic)
+	}
+
 	p.pic = rl.LoadTexture(picFileName)
 	if p.pic.Width == 0 || p.pic.Height == 0 {
 		return fmt.Errorf("failed loading %s as texture", picFileName)
@@ -316,6 +324,10 @@ type MainMenuSelection byte
 func (p *GraphicalUI) RunMainMenu() (MainMenuSelection, error) {
 	p.centeredPic = false
 	p.dungeonMasterText = "** Main menu **\n A:New Game\n B:Branch\n C:Continue\n Q:Quit"
+	if 0 < p.pic.Width {
+		rl.UnloadTexture(p.pic)
+	}
+
 	p.pic = rl.LoadTexture(MENUPICTUREFILE)
 	p.autoUpdate = false
 	p.generatingText = ""

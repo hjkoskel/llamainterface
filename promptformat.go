@@ -83,6 +83,31 @@ type PromptFormatter interface {
 	QueryStop() []string
 }
 
+type PromptFormatName string
+
+const (
+	PROMPTFORMAT_LLAMA31 = "LLAMAINST31"
+	PROMPTFORMAT_CHATML  = "CHATML"
+)
+
+func AllowedPromptFormatterNames() []string {
+	return []string{PROMPTFORMAT_LLAMA31, PROMPTFORMAT_CHATML}
+}
+
+// ParsePromptFormatter  creates promptFormatter
+func ParsePromptFormatter(s string, system string, users []string, assistant string) (PromptFormatter, error) {
+	switch strings.ToUpper(s) {
+	case PROMPTFORMAT_CHATML:
+		f := &ChatMLFormatter{System: system, Users: users, Assistant: assistant}
+		return f, nil
+	case PROMPTFORMAT_LLAMA31:
+		f := &Llama3InstructFormatter{System: system, Users: users, Assistant: assistant}
+		return f, nil
+	}
+	f := &Llama3InstructFormatter{System: system, Users: users, Assistant: assistant}
+	return f, fmt.Errorf("unknow formatter name")
+}
+
 func stringContainsAnyStrings(s string, candicates []string) string {
 	for _, c := range candicates {
 		if strings.Contains(s, c) {
@@ -91,6 +116,119 @@ func stringContainsAnyStrings(s string, candicates []string) string {
 	}
 	return ""
 }
+
+/*
+ChatML format is used on like
+https://huggingface.co/cognitivecomputations/dolphin-2.9.4-llama3.1-8b
+
+<|im_start|>system
+You are Dolphin, a helpful AI assistant.<|im_end|>
+<|im_start|>user
+{prompt}<|im_end|>
+<|im_start|>assistant
+*/
+
+type ChatMLFormatter struct {
+	System    string
+	Users     []string
+	Assistant string
+}
+
+func (p *ChatMLFormatter) QueryStop() []string {
+	return []string{"<|im_end|>"}
+}
+
+func (p *ChatMLFormatter) ExtractText(userName string, agentName string, prompt string) string {
+	s := strings.ReplaceAll(prompt, "<|im_start|>system", "")
+	s = strings.ReplaceAll(s, "<|im_start|>user", "")
+	s = strings.ReplaceAll(s, "<|im_start|>assistant", "")
+
+	s = strings.ReplaceAll(s, fmt.Sprintf("<|im_start|>%s", userName), "")
+	s = strings.ReplaceAll(s, fmt.Sprintf("<|im_start|>%s", agentName), "")
+	s = strings.ReplaceAll(s, "<|im_end|>", "")
+	return strings.TrimSpace(s)
+}
+
+func (p *ChatMLFormatter) Cleanup(s string) string {
+	//Used for
+	splitter := "<|end_header_id|>"
+	arr := strings.Split(s, splitter)
+	s = arr[len(arr)-1]
+
+	s = strings.ReplaceAll(s, "<|begin_of_text|>", "")
+	s = strings.ReplaceAll(s, "<|start_header_id|>", "")
+	s = strings.ReplaceAll(s, "<|end_header_id|>", "")
+	s = strings.ReplaceAll(s, "<|eot_id|>", "")
+	s = strings.ReplaceAll(s, "<|im_end|>", "")
+
+	return s
+}
+
+func (p *ChatMLFormatter) ToPrompt(data LLMMessages) (string, error) {
+	var sb strings.Builder
+	reserved := []string{"<|im_start|>", "<|im_end|>"}
+
+	if len(p.System) == 0 {
+		p.System = LLMMESSAGETYPE_SYSTEM
+	}
+	if len(p.Users) == 0 {
+		p.Users = []string{LLMMESSAGETYPE_USER}
+	}
+	if len(p.Assistant) == 0 {
+		p.Assistant = LLMMESSAGETYPE_ASSISTANT
+	}
+
+	errSanity := data.SanityCheck(p.System, p.Assistant, p.Users)
+	if errSanity != nil {
+		return "", errSanity
+	}
+
+	//sb.WriteString("<|begin_of_text|>")
+	for i, item := range data {
+		cont := stringContainsAnyStrings(item.Type, reserved)
+		if cont != "" {
+			return "", fmt.Errorf("message%d contains reserved string %s in type", i, cont)
+		}
+		cont = stringContainsAnyStrings(item.Content, reserved)
+		if cont != "" {
+			return "", fmt.Errorf("message%d contains reserved string %s in content", i, cont)
+		}
+
+		sb.WriteString(fmt.Sprintf("<|im_start|>%s\n%s", item.Type, strings.TrimSpace(item.Content)))
+		if i == len(data)-1 { //Idea is to have assistant (or dungeonmaster) as last entry
+			if len(item.Content) != 0 {
+				return "", fmt.Errorf("last content is not empty content: %s", item.Content)
+			}
+		} else {
+			sb.WriteString("<|im_end|>\n")
+		}
+	}
+	return sb.String(), nil
+}
+
+func (p *ChatMLFormatter) Parse(s string) (LLMMessages, error) {
+	s = strings.TrimSpace(s)
+
+	s = strings.Replace(s, "<|im_end|>", "", 1) //TODO need to test this?
+
+	pieces := strings.Split(s, "<|im_start|>")
+
+	result := make([]LLMMessage, len(pieces))
+	for i, piece := range pieces {
+		arr := strings.Fields(strings.TrimSpace(piece))
+		if len(arr) == 0 {
+			return result, fmt.Errorf("invalid format, nothing after im start %s", s)
+		}
+		result[i].Type = arr[0]
+		result[i].Content = strings.TrimSpace(strings.Replace(piece, result[i].Type, "", 1))
+	}
+
+	return result, nil
+}
+
+/*
+llama2 formatter
+*/
 
 type Llama2Formatter struct {
 	System    string
@@ -193,6 +331,8 @@ func (p *Llama3InstructFormatter) Cleanup(s string) string {
 	s = strings.ReplaceAll(s, "<|start_header_id|>", "")
 	s = strings.ReplaceAll(s, "<|end_header_id|>", "")
 	s = strings.ReplaceAll(s, "<|eot_id|>", "")
+	s = strings.ReplaceAll(s, "<|im_end|>", "")
+
 	return s
 }
 

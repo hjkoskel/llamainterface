@@ -12,8 +12,6 @@ import (
 	"os"
 
 	"path"
-
-	"github.com/hjkoskel/bindstablediff"
 )
 
 func LoadPng(fname string) (image.Image, error) {
@@ -43,7 +41,7 @@ func SavePng(fname string, img image.Image) error {
 	return nil
 }
 
-func CreatePngIfNotFound(gen ImageGenerator, fname string, prompt string) error {
+func CreatePngIfNotFound(gen ImageGenerator, fname string, prompt string, negativePrompt string) error {
 	byt, errRead := os.ReadFile(fname)
 	if errRead == nil {
 		_, errDecode := png.Decode(bytes.NewBuffer(byt))
@@ -52,7 +50,7 @@ func CreatePngIfNotFound(gen ImageGenerator, fname string, prompt string) error 
 		}
 
 	}
-	img, imgErr := gen.CreatePic(prompt)
+	img, imgErr := gen.CreatePic(prompt, negativePrompt)
 	if imgErr != nil {
 		return fmt.Errorf("img generation error %s", imgErr)
 	}
@@ -60,9 +58,10 @@ func CreatePngIfNotFound(gen ImageGenerator, fname string, prompt string) error 
 }
 
 type ImageGenerator interface {
-	CreatePic(prompt string) (image.Image, error)
+	CreatePic(prompt string, negativePrompt string) (image.Image, error)
 }
 
+/*
 type DiffusonImageGenerator struct {
 	model bindstablediff.StableDiffusionModel
 	Pars  bindstablediff.TextGenPars
@@ -93,3 +92,4 @@ func (p *DiffusonImageGenerator) CreatePic(prompt string) (image.Image, error) {
 	p.Pars.Prompt = prompt
 	return p.model.Txt2Img(p.Pars)
 }
+*/
