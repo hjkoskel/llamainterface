@@ -95,7 +95,7 @@ Actual options are
 
 So typical command line settings would be like
 ~~~
-./adventure -lm /usr/local/bin/llamafile -lm ~/Downloads/llama-3.2-1b-instruct-uncensored.Q8_0.gguf
+./adventure -l /usr/local/bin/llamafile -lm ~/Downloads/llama-3.2-1b-instruct-uncensored.Q8_0.gguf
 ~~~
 
 Game support llama3 inst models and models following chatml format. It is very important to use instruct tuned models.
@@ -135,6 +135,17 @@ Common options
 Software have menu system for starting new game or continuing old games.
 
 Newgames are created based on what json files are found from **./games** folder and old games are loaded from **./savegames**
+
+## Optional localization
+
+Game support [https://github.com/hjkoskel/turntongue](turntongue) language language translation server.
+Install and start it and it is possible
+
+- Option *-traurl*, translation url. Default http://127.0.0.1:8000/translate
+- Option *-lang-*, pick use this language in translation (fin_Latn etc... )
+- Option *-tmi*, set this flag and game translates all missing texts
+
+
 
 ## TODO
 

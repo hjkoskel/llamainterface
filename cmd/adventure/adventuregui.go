@@ -74,6 +74,7 @@ type GraphicalUI struct {
 	TextColumnWidth int
 	TextSpacing     int
 	FontSize        int
+	ChosenLanguage  LanguageName
 }
 
 // Splash screen.. goes to splash screen mode.
@@ -92,10 +93,11 @@ func (p *GraphicalUI) SplashScreen(picFileName string) error {
 
 func (p *GraphicalUI) SetPage(pictureFileName string, page AdventurePage) {
 	p.centeredPic = false
-	p.dungeonMasterText = WordWrap(page.Text, p.TextColumnWidth)
-	p.dungeonMasterTextDouble = WordWrap(page.Text, p.TextColumnWidth*2)
+	p.dungeonMasterText = WordWrap(page.GetText(p.ChosenLanguage), p.TextColumnWidth)
+	p.dungeonMasterTextDouble = WordWrap(page.GetText(p.ChosenLanguage), p.TextColumnWidth*2)
 	p.imagePromptText = WordWrap(page.PictureDescription, p.TextColumnWidth)
 	p.scrollPosition = -16 //-SCREEN_H / 3
+	p.userPromptText = page.GetUserResponse(p.ChosenLanguage)
 	p.SetPicture(pictureFileName)
 
 }
@@ -277,7 +279,7 @@ func (p *GraphicalUI) Close() error {
 	return nil
 }
 
-func InitGraphicalUI(title string) (*GraphicalUI, error) {
+func InitGraphicalUI(title string, fontFilename string) (*GraphicalUI, error) {
 	rl.InitWindow(SCREEN_W, SCREEN_H, title)
 	rl.SetTargetFPS(60)
 
@@ -285,10 +287,17 @@ func InitGraphicalUI(title string) (*GraphicalUI, error) {
 		rl.SetWindowSize(SCREEN_W, SCREEN_H)
 		rl.ToggleFullscreen()
 	}
+	fontChars := []rune{}
+	for r := rune(32); r <= 255; r++ {
+		fontChars = append(fontChars, r)
+	}
+
+	// Scandinavian characters
+	//fontChars = append(fontChars, []rune{'ö', 'ä', 'å', 'Ö', 'Ä', 'Å', '<', '>', ')', '!', '?', ')', 'ü', 'Ü', '*', '-', '+', ':'}...)
 
 	result := GraphicalUI{
-		fnt:             rl.LoadFont("pixantiqua.ttf"),
-		TextColumnWidth: 45,
+		fnt:             rl.LoadFontEx(fontFilename, MAINFONTSIZE-4, fontChars, int32(len(fontChars))),
+		TextColumnWidth: 40,
 		TextSpacing:     6,
 		FontSize:        MAINFONTSIZE,
 		autoUpdate:      true,

@@ -42,8 +42,8 @@ type WebInterface struct {
 	imageTemperature float64
 }
 
-func RunAsWebServer(portNumber int, imGen *ImageGenerator, llama *llamainterface.LLamaServer, textTemperature float64, imageTemperature float64) error {
-	webUi, errWebUi := InitWebInterface(imGen, llama)
+func RunAsWebServer(portNumber int, imGen *ImageGenerator, llama *llamainterface.LLamaServer, textTemperature float64, imageTemperature float64, translator *Translator) error {
+	webUi, errWebUi := InitWebInterface(imGen, llama, translator)
 	webUi.textTemperature = textTemperature
 	webUi.imageTemperature = imageTemperature
 	if errWebUi != nil {
@@ -63,7 +63,7 @@ func (p *WebInterface) Listen(portNumber int) error {
 //go:embed webui/gallery.css
 var emb_galleryCss []byte
 
-func loadGameById(gameid string, llama *llamainterface.LLamaServer) (AdventureGame, error) {
+func loadGameById(gameid string, llama *llamainterface.LLamaServer, translator *Translator) (AdventureGame, error) {
 	dirname := path.Join(SAVEGAMEDIR, gameid)
 	jsonList, errJsonList := getFirstJsonFilesFromDir(dirname)
 	if errJsonList != nil {
@@ -72,7 +72,7 @@ func loadGameById(gameid string, llama *llamainterface.LLamaServer) (AdventureGa
 	if len(jsonList) != 1 {
 		return AdventureGame{}, fmt.Errorf("invalid number of json files on game dir %s on %v", dirname, len(jsonList))
 	}
-	return loadAdventure(jsonList[0], llama, &textPromptFormatter)
+	return loadAdventure(jsonList[0], llama, &textPromptFormatter, translator)
 }
 
 //go:embed webui/gamepageStart.html
@@ -161,7 +161,7 @@ func loadPngToSmallPng(fname string, wantedWidth int) ([]byte, error) {
 
 }
 
-func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) (WebInterface, error) {
+func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer, translator *Translator) (WebInterface, error) {
 
 	result := WebInterface{
 		router: gin.Default(),
@@ -186,7 +186,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 	result.router.GET("/savegames/:gameid", func(c *gin.Context) {
 		fmt.Printf("SAVEGAME HAE VIIMEISIN %s\n", c.Param("gameid"))
 
-		game, errLoad := loadGameById(c.Param("gameid"), result.llama)
+		game, errLoad := loadGameById(c.Param("gameid"), result.llama, translator)
 		if errLoad != nil {
 			c.Error(errLoad)
 			return
@@ -199,7 +199,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 	result.router.GET("/savegames/:gameid/:pageNumber", func(c *gin.Context) {
 		fmt.Printf("SAVEGAME HAE %s entry %s\n", c.Param("gameid"), c.Param("index"))
 
-		game, errLoad := loadGameById(c.Param("gameid"), result.llama)
+		game, errLoad := loadGameById(c.Param("gameid"), result.llama, translator)
 		if errLoad != nil {
 			c.Error(errLoad)
 			return
@@ -239,7 +239,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 			return
 		}
 
-		newcat, newcatErr := CreateToCatalogue(jsonFileList, llama)
+		newcat, newcatErr := CreateToCatalogue(jsonFileList, llama, translator)
 		if newcatErr != nil {
 			c.Error(fmt.Errorf("error listing new games %s", newcatErr))
 			return
@@ -252,7 +252,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 		gamename := c.Param("gamename")
 		newgamefilename := path.Join(GAMESDIR, gamename+".json")
 		fmt.Printf("Going to start %s\n", newgamefilename)
-		game, errLoad := loadAdventure(newgamefilename, result.llama, &textPromptFormatter)
+		game, errLoad := loadAdventure(newgamefilename, result.llama, &textPromptFormatter, translator)
 		if errLoad != nil {
 			c.Error(fmt.Errorf("internal error:%s", errLoad))
 			return
@@ -283,7 +283,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 			return
 		}
 
-		cat, catErr := CreateToCatalogue(jsonList, llama)
+		cat, catErr := CreateToCatalogue(jsonList, llama, translator)
 		if catErr != nil {
 			fmt.Printf("TODO ERR %s\n", catErr)
 		}
@@ -312,7 +312,7 @@ func InitWebInterface(imGen *ImageGenerator, llama *llamainterface.LLamaServer) 
 		s = strings.Replace(s, "userPrompt=", "", 1)
 		fmt.Printf("RUUMIS=%s\n", s)
 
-		game, errLoad := loadGameById(c.Param("gameid"), result.llama)
+		game, errLoad := loadGameById(c.Param("gameid"), result.llama, translator)
 		if errLoad != nil {
 			c.Error(fmt.Errorf("game load err:%s", errLoad))
 			return

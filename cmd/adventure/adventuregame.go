@@ -17,6 +17,29 @@ type CalcStatistics struct { //Track performance of gaming system
 	Picture       int
 } //Instead of map, use struct. More controlled
 
+// Contains strings for looking up...
+type TranslatedPageData struct {
+	Text         map[LanguageName]string
+	UserResponse map[LanguageName]string
+}
+
+func (p *TranslatedPageData) ListLanguages() []LanguageName {
+	r := make(map[LanguageName]bool)
+
+	for k, _ := range p.Text {
+		r[k] = true
+	}
+	for k, _ := range p.UserResponse {
+		r[k] = true
+	}
+
+	result := []LanguageName{}
+	for name, _ := range r {
+		result = append(result, name)
+	}
+	return result
+}
+
 type AdventurePage struct {
 	Text         string
 	UserResponse string
@@ -31,15 +54,39 @@ type AdventurePage struct {
 	Timestamp time.Time //Nice to have information, used for generating pictures
 
 	GenerationTimes CalcStatistics
+
+	Localization TranslatedPageData
 }
 
-func (p *AdventurePage) ToMarkdown() string {
+func (p *AdventurePage) GetText(lang LanguageName) string { // if localized not found, return default
+	if p.Localization.Text == nil {
+		return p.Text
+	}
+	txt, haz := p.Localization.Text[lang]
+	if !haz {
+		return p.Text
+	}
+	return txt
+}
+
+func (p *AdventurePage) GetUserResponse(lang LanguageName) string {
+	if p.Localization.UserResponse == nil {
+		return p.UserResponse
+	}
+	txt, haz := p.Localization.UserResponse[lang]
+	if !haz {
+		return p.UserResponse
+	}
+	return txt
+}
+
+func (p *AdventurePage) ToMarkdown(lang LanguageName) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("![%s](%s)", strings.TrimSpace(strings.ReplaceAll(p.PictureDescription, "\n", " ")), path.Base(p.PictureFileName())))
-	sb.WriteString("\n" + p.Text + "\n")
+	sb.WriteString("\n" + p.GetText(lang) + "\n")
 
 	if 0 < len(p.UserResponse) {
-		sb.WriteString(fmt.Sprintf("\n~~~\n%s\n~~~\n---------------------------\n", p.UserResponse))
+		sb.WriteString(fmt.Sprintf("\n~~~\n%s\n~~~\n---------------------------\n", p.GetUserResponse(lang)))
 	}
 	return sb.String()
 }
@@ -77,6 +124,8 @@ type AdventureGame struct {
 	promptFormatter          llamainterface.PromptFormatter // PromptFormatter
 	introPromptTokens        int
 	llama                    *llamainterface.LLamaServer
+
+	translator *Translator
 }
 
 const TIMEOUTTOKENIZE time.Duration = time.Second * 120
@@ -191,7 +240,7 @@ func (p *AdventureGame) CalcTokensMissing() error {
 }
 
 // loadAdventure Continues existing adventure... OR starts from empty?
-func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promptformatter *llamainterface.PromptFormatter) (AdventureGame, error) {
+func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promptformatter *llamainterface.PromptFormatter, translator *Translator) (AdventureGame, error) {
 	byt, readErr := os.ReadFile(loadGameFile)
 	if readErr != nil {
 		return AdventureGame{}, fmt.Errorf("error reading savegame %s  err:%s", loadGameFile, readErr)
@@ -206,6 +255,7 @@ func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promp
 	}
 	result.promptFormatter = *promptformatter // &llamainterface.Llama3InstructFormatter{System: "system", Users: []string{"player"}, Assistant: "dungeonmaster"}
 	result.llama = llama
+	result.translator = translator
 	errTok := result.CalcTokensMissing() //Assuming that does not take long. Tokenization is fast
 	if errTok != nil {
 		return result, fmt.Errorf("error tokens missing %s", errTok)
@@ -242,10 +292,6 @@ func (p *AdventureGame) GetSaveDir() string {
 }
 
 func (p *AdventureGame) GetMenuPictureFile() string {
-	/*	if len(p.Pages) == 0 {
-			return p.gameTitlepictureFilename
-		}
-	*/
 	for i := len(p.Pages) - 1; 0 <= i; i-- {
 		fname := path.Join(p.GetSaveDir(), p.Pages[i].PictureFileName())
 		_, errLoad := LoadPng(fname)
@@ -253,6 +299,47 @@ func (p *AdventureGame) GetMenuPictureFile() string {
 			return fname
 		}
 	}
-
 	return p.gameTitlepictureFilename
+}
+
+func (p *AdventureGame) TranslateMissing() error {
+	if len(p.translator.Lang) == 0 {
+		return nil
+	}
+	//First texts?
+	for pagenumber, page := range p.Pages {
+		if page.Localization.Text != nil {
+			_, haz := page.Localization.Text[p.translator.Lang]
+			if haz {
+				continue
+			}
+		} else {
+			p.Pages[pagenumber].Localization.Text = make(map[LanguageName]string)
+		}
+		//Need to translate
+		translated, errTranslator := p.translator.FromEnglish(page.Text)
+		if errTranslator != nil {
+			return errTranslator
+		}
+		p.Pages[pagenumber].Localization.Text[p.translator.Lang] = translated
+	}
+
+	for pagenumber, page := range p.Pages {
+		if page.Localization.UserResponse != nil {
+			_, haz := page.Localization.UserResponse[p.translator.Lang]
+			if haz {
+				continue
+			}
+		} else {
+			p.Pages[pagenumber].Localization.UserResponse = make(map[LanguageName]string)
+		}
+		//Need to translate
+		translated, errTranslator := p.translator.FromEnglish(page.UserResponse)
+		if errTranslator != nil {
+			return errTranslator
+		}
+		p.Pages[pagenumber].Localization.UserResponse[p.translator.Lang] = translated
+	}
+
+	return nil
 }

@@ -184,7 +184,7 @@ func (p *StableDiffusionCppParameters) ToJSON() string {
 	if d.SampleSteps != p.SampleSteps {
 		pieces = append(pieces, fmt.Sprintf("\"sample_steps\":%#v", p.SampleSteps))
 		pieces = append(pieces, fmt.Sprintf("\"steps\":%#v", p.SampleSteps))
-		pieces = append(pieces, fmt.Sprintf("\"sampling_steps", p.SampleSteps))
+		pieces = append(pieces, fmt.Sprintf("\"sampling_steps\":%#v", p.SampleSteps))
 	}
 	if d.BatchCount != p.BatchCount {
 		pieces = append(pieces, fmt.Sprintf("\"batch_count\":%#v", p.BatchCount))

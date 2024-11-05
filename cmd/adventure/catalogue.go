@@ -100,8 +100,9 @@ func ListNewGamesJson(newgameDirName string, llama *llamainterface.LLamaServer) 
 	return result, nil
 }
 
-func GameJsonToCatalogueEntry(fname string, llama *llamainterface.LLamaServer) (GameCatalogueEntry, error) {
-	g, errG := loadAdventure(fname, llama, &textPromptFormatter)
+// TODO SIMPLIFY AS METHOD ON Adventure
+func GameJsonToCatalogueEntry(fname string, llama *llamainterface.LLamaServer, translator *Translator) (GameCatalogueEntry, error) {
+	g, errG := loadAdventure(fname, llama, &textPromptFormatter, translator)
 	if errG != nil {
 		return GameCatalogueEntry{}, fmt.Errorf("was not able to open game %s error:%s", fname, errG)
 	}
@@ -125,11 +126,11 @@ func GameJsonToCatalogueEntry(fname string, llama *llamainterface.LLamaServer) (
 	}, nil
 }
 
-func CreateToCatalogue(filelist []string, llama *llamainterface.LLamaServer) (GameCatalogue, error) {
+func CreateToCatalogue(filelist []string, llama *llamainterface.LLamaServer, translator *Translator) (GameCatalogue, error) {
 	result := make([]GameCatalogueEntry, len(filelist))
 	var errLoad error
 	for i, fname := range filelist {
-		result[i], errLoad = GameJsonToCatalogueEntry(fname, llama)
+		result[i], errLoad = GameJsonToCatalogueEntry(fname, llama, translator)
 		if errLoad != nil {
 			return GameCatalogue{}, errLoad
 		}

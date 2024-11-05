@@ -113,29 +113,68 @@ func (p *AdventureGame) WriteBlankFile(fname string) error {
 
 const MDFILENOTIFICATION = "This is game printout made by [LLM adventure game prototype, https://github.com/hjkoskel/llamainterface/tree/main/cmd/adventure](https://github.com/hjkoskel/llamainterface/tree/main/cmd/adventure)"
 
-// Writes game to disk markdown?
-func (p *AdventureGame) SaveGame() error {
+// SaveMarkdowns all languages found
+func (p *AdventureGame) SaveMarkdowns() error {
+	lst := p.ListLanguagesFound()
+	for _, a := range lst {
+		errSave := p.SaveMarkdown(a)
+		if errSave != nil {
+			return errSave
+		}
+	}
+	return p.SaveMarkdown("")
+}
+
+func (p *AdventureGame) SaveMarkdown(lang LanguageName) error {
 	var sb strings.Builder
 	sb.WriteString(MDFILENOTIFICATION + "\n\n# " + p.GameName + "\n" + p.Introprompt + "\n")
 
 	for i, page := range p.Pages {
 		sb.WriteString(fmt.Sprintf("\n# %v\n", i+1))
-		sb.WriteString(page.ToMarkdown())
+		sb.WriteString(page.ToMarkdown(lang))
 	}
 
 	d := p.GetSaveDir()
 	os.MkdirAll(d, 0777)
 
-	errWriteMarkdown := os.WriteFile(path.Join(d, p.GameName+".md"), []byte(sb.String()), 0666)
+	errWriteMarkdown := os.WriteFile(path.Join(d, p.GameName+string(lang)+".md"), []byte(sb.String()), 0666)
 	if errWriteMarkdown != nil {
 		return fmt.Errorf("error writing write markdown %s", errWriteMarkdown)
 	}
+	return nil
+}
+
+// Writes game to disk markdown?
+func (p *AdventureGame) SaveGame() error {
+	errSaveMarkdown := p.SaveMarkdowns()
+	if errSaveMarkdown != nil {
+		return errSaveMarkdown
+	}
+
+	d := p.GetSaveDir()
+	os.MkdirAll(d, 0777)
 
 	byt, errMarsh := json.MarshalIndent(*p, "", " ")
 	if errMarsh != nil {
 		return errMarsh
 	}
 	return os.WriteFile(path.Join(d, p.GameName+".json"), byt, 0666)
+}
+
+func (p *AdventureGame) ListLanguagesFound() []LanguageName {
+	lst := []LanguageName{}
+	for _, page := range p.Pages {
+		lst = append(lst, page.Localization.ListLanguages()...)
+	}
+	m := make(map[LanguageName]bool)
+	for _, n := range lst {
+		m[n] = true
+	}
+	result := []LanguageName{}
+	for k, _ := range m {
+		result = append(result, k)
+	}
+	return result
 }
 
 func (p *AdventureGame) GenerateLatestPicture(temperature float64, imGen *ImageGenerator) error {
@@ -256,8 +295,21 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 		return fmt.Errorf("empty input to existing game")
 	}
 
-	if 0 < len(p.Pages) {
-		p.Pages[len(p.Pages)-1].UserResponse = input
+	//TODO TRANSLATE HERE
+
+	if len(p.translator.Lang) == 0 {
+		if 0 < len(p.Pages) {
+			p.Pages[len(p.Pages)-1].UserResponse = input
+		}
+	} else {
+		inputTranslated, translateErr := p.translator.ToEnglish(input)
+		if translateErr != nil {
+			return fmt.Errorf("prompt translation error %s\n", translateErr)
+		}
+		if 0 < len(p.Pages) {
+			p.Pages[len(p.Pages)-1].UserResponse = inputTranslated                       //Translated to english in case of input. English is LLM model language
+			p.Pages[len(p.Pages)-1].Localization.UserResponse[p.translator.Lang] = input //original lang
+		}
 	}
 
 	fmt.Printf("------- PAGES ARE -------\n%#v\n--------------\n", p.Pages)
@@ -288,6 +340,14 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 	color.Magenta(fmt.Sprintf("PROMPT RESPONSE IS %s\n", respText))
 	msg := p.promptFormatter.Cleanup(respText)
 	fmt.Printf("---after parsing---\n")
+	loca := TranslatedPageData{Text: map[LanguageName]string{}, UserResponse: map[LanguageName]string{}}
+	if 0 < len(p.translator.Lang) {
+		translatedMsg, errMsgTranslate := p.translator.FromEnglish(msg)
+		if errMsgTranslate != nil {
+			return errMsgTranslate
+		}
+		loca.Text[p.translator.Lang] = translatedMsg
+	}
 
 	nextPage := AdventurePage{
 		Text:               msg,
@@ -296,7 +356,8 @@ func (p *AdventureGame) UserInteraction(temperature float64, temperaturePicture 
 		TokenCount:         0,  //TODO CALC LATER?
 		PictureDescription: "", //TODO GET WITH LLM
 		//PictureFileName    string //without path?  generate on fly
-		Timestamp: time.Now(),
+		Timestamp:    time.Now(),
+		Localization: loca,
 	}
 	nextPage.GenerationTimes.MainLLM = int(time.Since(tCompletionStart).Milliseconds())
 
@@ -498,7 +559,7 @@ func main() {
 	pResetPicturePrompts := flag.Bool("rpp", false, "reset picture prompts from specific game")
 
 	//LLM model
-	pLlamafile := flag.String("l", "/usr/local/bin/llamafile", ".llamafile filename, starts that file as server. Or llama-server file (then model is needed)")
+	pLlamafile := flag.String("l", "", ".llamafile filename, starts that file as server. Or llama-server file (then model is needed)")
 	pLlamafileModel := flag.String("lm", "", "use alternative .gguf model file on this llamafile instead")
 	pServerHost := flag.String("h", "", "llama.cpp server host")
 	pllmPort := flag.Int("p", 8080, "llama.cpp or lllamafile server port. 0 for kernel decides for llamafile")
@@ -506,6 +567,7 @@ func main() {
 	pPromptFormatterName := flag.String("pf", llamainterface.PROMPTFORMAT_LLAMA31, fmt.Sprintf("formatter name:%v", llamainterface.AllowedPromptFormatterNames()))
 	//UI settings
 	pUiPort := flag.Int("uip", 0, "web ui port")
+	pFontFileName := flag.String("font", "pixantiqua.ttf", "ttf font file name")
 
 	pImageGenEndpointUrl := flag.String("igurl", "http://127.0.0.1:8800/txt2img", "image generator URL")
 	pImagGenWidth := flag.Int("igw", 1024, "image generation X-resolution")
@@ -517,7 +579,25 @@ func main() {
 	pCreateBlank := flag.String("blank", "", "Create blank game file as example from this for creating new adventure games")
 	pRunOnLatest := flag.String("rol", "", "filename of text file, one query per row. Run on latest and produce out_filename as result. Used for development")
 
+	//
+	pTranslateServer := flag.String("traurl", "http://127.0.0.1:8000/translate", "translation server")
+	pLang := flag.String("lang", "", "use this language in translation (fin_Latn etc... )")
+	pTranslateMissing := flag.Bool("tmi", false, "do translation on missing pages to target language")
 	flag.Parse()
+
+	if 0 < len(*pLang) {
+		if !IsSupportedLanguage(LanguageName(*pLang)) {
+			fmt.Printf("The %s Not supported language. Please choose: %#v", *pLang, ListOfAllowedLanguages())
+			return
+		}
+	}
+	lang := ToLanguage(*pLang) //Non case sensitive
+	if strings.HasPrefix(string(lang), "rus_") {
+		fmt.Printf("Language %s is not supported on game applications\n", *pLang)
+		return
+	}
+
+	translator := Translator{Url: *pTranslateServer, Lang: lang}
 
 	if len(*pLlamafile) == 0 && *pllmPort == 0 {
 		fmt.Printf("llama port must be defined when not starting llamafile from executable")
@@ -589,7 +669,7 @@ func main() {
 		return
 	}
 
-	cat, catErr := CreateToCatalogue(jsonNewGameList, llama)
+	cat, catErr := CreateToCatalogue(jsonNewGameList, llama, &translator)
 
 	if catErr != nil {
 		fmt.Printf("FAILED LISTING GAME CATALOG %s\n", catErr)
@@ -608,7 +688,7 @@ func main() {
 	* start web UI if wanted in server mode
 	*******/
 	if 0 < *pUiPort {
-		errWebRun := RunAsWebServer(*pUiPort, &imGen, llama, *pTempTextPrompt, *pTempImageTextPrompt)
+		errWebRun := RunAsWebServer(*pUiPort, &imGen, llama, *pTempTextPrompt, *pTempImageTextPrompt, &translator)
 		fmt.Printf("WEB UI FAILED WITH ERROR %s\n", errWebRun)
 		return
 	}
@@ -620,11 +700,12 @@ func main() {
 	var ui *GraphicalUI
 	if len(*pRunOnLatest) == 0 || len(*pLoadFile) == 0 {
 		var errUi error
-		ui, errUi = localUIStart()
+		ui, errUi = localUIStart(*pFontFileName)
 		if errUi != nil {
 			fmt.Printf("%s\n", errUi)
 			return
 		}
+		ui.ChosenLanguage = translator.Lang //TODO change language on fly?
 	}
 
 	/****************
@@ -639,7 +720,7 @@ func main() {
 
 		fmt.Printf("\n--- Loading:%s ---\n\n", *pLoadFile)
 		var errGameInit error
-		game, errGameInit = loadAdventure(*pLoadFile, llama, &textPromptFormatter)
+		game, errGameInit = loadAdventure(*pLoadFile, llama, &textPromptFormatter, &translator)
 		if errGameInit != nil {
 			fmt.Printf("err game load from %s err:%s\n", *pLoadFile, errGameInit)
 			return
@@ -649,7 +730,7 @@ func main() {
 		}
 	} else {
 		var errGetGame error
-		game, errGetGame = localUIGetGame(ui, imGen, llama)
+		game, errGetGame = localUIGetGame(ui, imGen, llama, &translator)
 		if errGetGame != nil {
 			fmt.Printf("%s\n", errGetGame)
 			return
@@ -708,6 +789,15 @@ func main() {
 				return
 			}
 			doneCounter++
+		}
+	}
+
+	if *pTranslateMissing {
+		ui.SetGenerating("translate pages.... waiting...")
+		errTranslate := game.TranslateMissing()
+		if errTranslate != nil {
+			fmt.Printf("error translate %s\n", errTranslate)
+			return
 		}
 	}
 

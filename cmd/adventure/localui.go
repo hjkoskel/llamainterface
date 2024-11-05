@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-func localUIStart() (*GraphicalUI, error) {
+func localUIStart(fontFilename string) (*GraphicalUI, error) {
 	/**** Check is there title picture for menu *****/
-	ui, uiErr := InitGraphicalUI("ADVENTURE")
+	ui, uiErr := InitGraphicalUI("ADVENTURE", fontFilename)
 	if uiErr != nil {
 		return nil, fmt.Errorf("UI init err %s\n", uiErr)
 	}
@@ -25,7 +25,7 @@ func localUIStart() (*GraphicalUI, error) {
 	return ui, nil
 }
 
-func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface.LLamaServer) (AdventureGame, error) {
+func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface.LLamaServer, translator *Translator) (AdventureGame, error) {
 	var game AdventureGame
 	//Lets show main menu
 	menuSel, errMenuSel := ui.RunMainMenu()
@@ -52,7 +52,7 @@ func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface
 		fmt.Printf(" %v: %s\n", i, s)
 	}
 
-	cat, catErr := CreateToCatalogue(gameJsonList, llama)
+	cat, catErr := CreateToCatalogue(gameJsonList, llama, translator)
 
 	if catErr != nil {
 		return AdventureGame{}, fmt.Errorf("error catalogueing %s", catErr)
@@ -62,7 +62,7 @@ func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface
 	if errPick != nil {
 		return AdventureGame{}, fmt.Errorf("localUIGetGame: error picking %s\n", errPick)
 	}
-	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama, &textPromptFormatter)
+	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama, &textPromptFormatter, translator)
 	if errGameLoad != nil {
 		return AdventureGame{}, errGameLoad
 	}

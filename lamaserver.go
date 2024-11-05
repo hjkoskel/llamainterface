@@ -112,6 +112,9 @@ func InitLlamafileServer(ctx context.Context, llamafilename string, parameters S
 
 func InitLLamaServer(hostname string, port int) (LLamaServer, error) {
 	//TODO error check? Other options. Spin up server if local?
+	if len(hostname) == 0 {
+		return LLamaServer{baseUrl: fmt.Sprintf("http://127.0.0.1:%v", port)}, nil
+	}
 	return LLamaServer{baseUrl: fmt.Sprintf("http://%s:%v", hostname, port)}, nil
 }
 
