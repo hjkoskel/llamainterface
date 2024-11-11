@@ -15,6 +15,7 @@ type CalcStatistics struct { //Track performance of gaming system
 	Summary       int
 	PicturePrompt int
 	Picture       int
+	TextTTS       int
 } //Instead of map, use struct. More controlled
 
 // Contains strings for looking up...
@@ -96,6 +97,20 @@ func (p *AdventurePage) PictureFileName() string {
 	return fmt.Sprintf("%v.png", p.Timestamp.Unix()) //Not suitable for serving huge number of games... or just use random ID?
 }
 
+func (p *AdventurePage) TTSTextFileName(lang LanguageName) string {
+	if len(lang) == 0 || lang == LANG_eng_Latn {
+		return fmt.Sprintf("%v.wav", p.Timestamp.Unix())
+	}
+	return fmt.Sprintf("%v_%s.wav", p.Timestamp.Unix(), lang) //Not suitable for serving huge number of games... or just use random ID?
+}
+
+func (p *AdventurePage) TTSPromptFileName(lang LanguageName) string {
+	if len(lang) == 0 || lang == LANG_eng_Latn {
+		return fmt.Sprintf("%v_prompt.wav", p.Timestamp.Unix())
+	}
+	return fmt.Sprintf("%v_prompt_%s.wav", p.Timestamp.Unix(), lang) //Not suitable for serving huge number of games... or just use random ID?
+}
+
 func (p *AdventurePage) ToLLMMessages() []llamainterface.LLMMessage {
 	result := []llamainterface.LLMMessage{
 		llamainterface.LLMMessage{Type: DUNGEONMASTER, Content: p.Text},
@@ -126,6 +141,7 @@ type AdventureGame struct {
 	llama                    *llamainterface.LLamaServer
 
 	translator *Translator
+	ttsengine  *TTSInterf
 }
 
 const TIMEOUTTOKENIZE time.Duration = time.Second * 120
@@ -240,7 +256,7 @@ func (p *AdventureGame) CalcTokensMissing() error {
 }
 
 // loadAdventure Continues existing adventure... OR starts from empty?
-func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promptformatter *llamainterface.PromptFormatter, translator *Translator) (AdventureGame, error) {
+func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promptformatter *llamainterface.PromptFormatter, translator *Translator, ttsEngine *TTSInterf) (AdventureGame, error) {
 	byt, readErr := os.ReadFile(loadGameFile)
 	if readErr != nil {
 		return AdventureGame{}, fmt.Errorf("error reading savegame %s  err:%s", loadGameFile, readErr)
@@ -256,6 +272,7 @@ func loadAdventure(loadGameFile string, llama *llamainterface.LLamaServer, promp
 	result.promptFormatter = *promptformatter // &llamainterface.Llama3InstructFormatter{System: "system", Users: []string{"player"}, Assistant: "dungeonmaster"}
 	result.llama = llama
 	result.translator = translator
+	result.ttsengine = ttsEngine
 	errTok := result.CalcTokensMissing() //Assuming that does not take long. Tokenization is fast
 	if errTok != nil {
 		return result, fmt.Errorf("error tokens missing %s", errTok)
@@ -300,6 +317,19 @@ func (p *AdventureGame) GetMenuPictureFile() string {
 		}
 	}
 	return p.gameTitlepictureFilename
+}
+
+func (p *AdventureGame) GenerateAllSpeeches() error {
+	for pagenumber, page := range p.Pages {
+		fmt.Printf("Running TTS on page %v/%v\n", pagenumber, len(p.Pages))
+		txt := page.GetText(p.translator.Lang)
+		a := *p.ttsengine
+		errRun := a.Run(txt, path.Join(p.GetSaveDir(), page.TTSTextFileName(p.translator.Lang)))
+		if errRun != nil {
+			return errRun
+		}
+	}
+	return nil
 }
 
 func (p *AdventureGame) TranslateMissing() error {

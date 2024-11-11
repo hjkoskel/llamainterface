@@ -145,19 +145,37 @@ Install and start it and it is possible
 - Option *-lang-*, pick use this language in translation (fin_Latn etc... )
 - Option *-tmi*, set this flag and game translates all missing texts
 
+## Optional text to speech
+
+Game includes experimental support for text to speech.
+* https://github.com/rhasspy/piper
+* https://github.com/festvox/flite
+* https://github.com/PABannier/bark.cpp
+
+Install one of those TTS softwares and required voices etc.. Remember that those might be even available as package for your distro.
+
+
+Option **-ttstype** choose TTS type [piper,flite,bark]
+Option **-ttsex** TTS executable name, not needed if default matches what is found from.
+Option **-ttsmodel** tts model file or model name
+Option **-ttsconffile** tts config file name if model supports it
+
+| -ttstype |    -ttsex     |     -ttsmodel       | -ttsconffile |
+|----------|---------------|---------------------|--------------|
+|  piper   | default:piper | .onnx model of file | json conf file of sound model. Not required if confg have same name as .onnx file added with .json |
+|  flite   | default:flite | name of voice (-voice on flite), ignore paramtere if default is ok | not in use yet|
+|  bark    | default:bark  | filename of weights like "bark-small/ggml_weights.bin" |  not in use yet |
 
 
 ## TODO
 
 - youtube video
 - More games, update prompts
-- ML language Translation
 - support for scrolling pages back on local ui
 - Store seed number of image generation. Allows re-calculation of picture
-- Add command line option to reset all picture prompts and re-generate those and pictures. Important when testing image generation prompting
 - store languea model used on each page
 - llm or image synthesis duration for benchmarking
-- Speech and/or music generation
+- music generation
 - Internal LLM model execution for easier deployment (CPU)
 - Video mode resolution selection on command prompt
 - Utilize summary when building prompt and context lenght is filling up

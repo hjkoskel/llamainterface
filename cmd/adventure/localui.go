@@ -5,6 +5,8 @@ import (
 	"llamainterface"
 	"path"
 	"time"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 func localUIStart(fontFilename string) (*GraphicalUI, error) {
@@ -25,7 +27,7 @@ func localUIStart(fontFilename string) (*GraphicalUI, error) {
 	return ui, nil
 }
 
-func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface.LLamaServer, translator *Translator) (AdventureGame, error) {
+func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface.LLamaServer, translator *Translator, ttsEngine *TTSInterf) (AdventureGame, error) {
 	var game AdventureGame
 	//Lets show main menu
 	menuSel, errMenuSel := ui.RunMainMenu()
@@ -52,7 +54,7 @@ func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface
 		fmt.Printf(" %v: %s\n", i, s)
 	}
 
-	cat, catErr := CreateToCatalogue(gameJsonList, llama, translator)
+	cat, catErr := CreateToCatalogue(gameJsonList, llama, translator, ttsEngine)
 
 	if catErr != nil {
 		return AdventureGame{}, fmt.Errorf("error catalogueing %s", catErr)
@@ -62,7 +64,7 @@ func localUIGetGame(ui *GraphicalUI, imGen ImageGenerator, llama *llamainterface
 	if errPick != nil {
 		return AdventureGame{}, fmt.Errorf("localUIGetGame: error picking %s\n", errPick)
 	}
-	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama, &textPromptFormatter, translator)
+	game, errGameLoad := loadAdventure(pickResult.GameFileName, llama, &textPromptFormatter, translator, ttsEngine)
 	if errGameLoad != nil {
 		return AdventureGame{}, errGameLoad
 	}
@@ -90,6 +92,13 @@ func localUIFlow(ui *GraphicalUI, game AdventureGame, temperature float64, image
 	}
 	last := game.Pages[len(game.Pages)-1]
 
+	ui.SetGenerating("Generating audio...")
+	ui.Render()
+	errGenTTS := game.GenerateLatestTTS(game.ttsengine)
+	if errGenTTS != nil {
+		return errGenTTS
+	}
+
 	if !game.Textmode {
 		ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last) //menucpicture is the last or menupicture if no latest pic
 		ui.SetGenerating("Generating picture...")
@@ -102,6 +111,7 @@ func localUIFlow(ui *GraphicalUI, game AdventureGame, temperature float64, image
 	ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last) //menucpicture is the last or menupicture if no latest pic
 	ui.Render()
 
+	snd, _ := ui.PlayAudioFile(path.Join(game.GetSaveDir(), last.TTSTextFileName(game.translator.Lang)))
 	for {
 		fmt.Printf("--get user input--\n")
 		userInput, errUser := ui.GetPrompt()
@@ -109,6 +119,7 @@ func localUIFlow(ui *GraphicalUI, game AdventureGame, temperature float64, image
 			fmt.Printf("\n\nExit by %s\n\n", errUser)
 			break
 		}
+		rl.UnloadSound(snd)
 		fmt.Printf("---process user input:%s ---\n", userInput)
 		ui.SetGenerating("Running LLM....")
 		ui.Render()
@@ -118,6 +129,14 @@ func localUIFlow(ui *GraphicalUI, game AdventureGame, temperature float64, image
 			return fmt.Errorf("ERROR: Failed running game: %s\n", errRun)
 		}
 		last := game.Pages[len(game.Pages)-1]
+
+		ui.SetGenerating("Generating audio...")
+		ui.Render()
+		errGenTTS := game.GenerateLatestTTS(game.ttsengine)
+		if errGenTTS != nil {
+			return errGenTTS
+		}
+		snd, _ = ui.PlayAudioFile(path.Join(game.GetSaveDir(), last.TTSTextFileName(game.translator.Lang)))
 
 		if !game.Textmode {
 			ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last)

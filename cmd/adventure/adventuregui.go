@@ -118,6 +118,20 @@ func (p *GraphicalUI) SetGenerating(txt string) {
 	p.generatingText = txt
 }
 
+func (p *GraphicalUI) PlayAudioFile(fname string) (rl.Sound, time.Duration) {
+	fmt.Printf("\n\nGOING TO PLAY %s\n\n", fname)
+
+	sound := rl.LoadSound(fname) //Bad raylib... no error handling :(
+	//defer rl.UnloadSound(sound)
+	// Play sound
+	rl.PlaySound(sound)
+	audioDur := time.Second*time.Duration(sound.FrameCount/sound.Stream.SampleRate) + time.Second
+	fmt.Printf("\nAUDIO DURATION %s\n", audioDur)
+	//time.Sleep(audioDur)
+
+	return sound, audioDur
+}
+
 func (p *GraphicalUI) Render() error {
 	if rl.WindowShouldClose() {
 		return fmt.Errorf("window should close, not possible to draw")
@@ -282,6 +296,7 @@ func (p *GraphicalUI) Close() error {
 func InitGraphicalUI(title string, fontFilename string) (*GraphicalUI, error) {
 	rl.InitWindow(SCREEN_W, SCREEN_H, title)
 	rl.SetTargetFPS(60)
+	rl.InitAudioDevice()
 
 	if !rl.IsWindowFullscreen() {
 		rl.SetWindowSize(SCREEN_W, SCREEN_H)

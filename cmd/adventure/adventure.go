@@ -191,6 +191,17 @@ func (p *AdventureGame) GenerateLatestPicture(temperature float64, imGen *ImageG
 	return errCreate
 }
 
+func (p *AdventureGame) GenerateLatestTTS(ttsgen *TTSInterf) error {
+	if len(p.Pages) == 0 {
+		return fmt.Errorf("no pages")
+	}
+	last := p.Pages[len(p.Pages)-1]
+	tStart := time.Now()
+	errCreate := CreateTTSAudioIfNotFound(*ttsgen, path.Join(p.GetSaveDir(), last.TTSTextFileName(p.translator.Lang)), last.Text)
+	p.Pages[len(p.Pages)-1].GenerationTimes.TextTTS = int(time.Since(tStart).Milliseconds())
+	return errCreate
+}
+
 func (p *AdventureGame) CalcImagePrompt(inputText string, temperature float64) (string, error) {
 	//---- TODO add separate...
 	imGenPrompt, errImGenPrompt := p.Artist.GetLLMMEssages(inputText)
@@ -583,6 +594,14 @@ func main() {
 	pTranslateServer := flag.String("traurl", "http://127.0.0.1:8000/translate", "translation server")
 	pLang := flag.String("lang", "", "use this language in translation (fin_Latn etc... )")
 	pTranslateMissing := flag.Bool("tmi", false, "do translation on missing pages to target language")
+
+	//Text to speech
+	pTTSall := flag.Bool("ttsall", false, "when loaded run all TTS entries thru synthesis before starting")
+	pTTStype := flag.String("ttstype", "", "choose TTS type ["+strings.Join(GetAllowedTTStypes(), ",")+"]")
+	pTTSExecutableFile := flag.String("ttsex", "", "TTS executable name")
+	pTTSModel := flag.String("ttsmodel", "", "tts model file or model name")
+	pTTSConfigFile := flag.String("ttsconffile", "", "tts config file name if model supports it")
+
 	flag.Parse()
 
 	if 0 < len(*pLang) {
@@ -598,6 +617,29 @@ func main() {
 	}
 
 	translator := Translator{Url: *pTranslateServer, Lang: lang}
+
+	/********************
+		TTS engine init
+	**********************/
+	var ttsEngine TTSInterf
+	//ttsEngine = &NoTTS{}
+	/*
+		pd := PiperDefault(
+			"/home/henri/aimallit/piperbin/piper/piper",
+			"/home/henri/aimallit/piperbin/piper/fi_FI-harri-medium.onnx",
+			"/home/henri/aimallit/piperbin/piper/fi_fi_FI_harri_medium_fi_FI-harri-medium.onnx.json")
+	*/
+	ttsEngine, errTTS := ChooseTTS(*pTTStype, *pTTSExecutableFile, *pTTSModel, *pTTSConfigFile)
+	if errTTS != nil {
+		fmt.Printf("error choosing TTS: %s\n", errTTS)
+		return
+	}
+
+	//ttsEngine = TTSInterf(&pd)
+
+	/*
+		llama
+		**/
 
 	if len(*pLlamafile) == 0 && *pllmPort == 0 {
 		fmt.Printf("llama port must be defined when not starting llamafile from executable")
@@ -669,7 +711,7 @@ func main() {
 		return
 	}
 
-	cat, catErr := CreateToCatalogue(jsonNewGameList, llama, &translator)
+	cat, catErr := CreateToCatalogue(jsonNewGameList, llama, &translator, &ttsEngine)
 
 	if catErr != nil {
 		fmt.Printf("FAILED LISTING GAME CATALOG %s\n", catErr)
@@ -688,7 +730,7 @@ func main() {
 	* start web UI if wanted in server mode
 	*******/
 	if 0 < *pUiPort {
-		errWebRun := RunAsWebServer(*pUiPort, &imGen, llama, *pTempTextPrompt, *pTempImageTextPrompt, &translator)
+		errWebRun := RunAsWebServer(*pUiPort, &imGen, llama, *pTempTextPrompt, *pTempImageTextPrompt, &translator, &ttsEngine)
 		fmt.Printf("WEB UI FAILED WITH ERROR %s\n", errWebRun)
 		return
 	}
@@ -720,7 +762,7 @@ func main() {
 
 		fmt.Printf("\n--- Loading:%s ---\n\n", *pLoadFile)
 		var errGameInit error
-		game, errGameInit = loadAdventure(*pLoadFile, llama, &textPromptFormatter, &translator)
+		game, errGameInit = loadAdventure(*pLoadFile, llama, &textPromptFormatter, &translator, &ttsEngine)
 		if errGameInit != nil {
 			fmt.Printf("err game load from %s err:%s\n", *pLoadFile, errGameInit)
 			return
@@ -730,7 +772,7 @@ func main() {
 		}
 	} else {
 		var errGetGame error
-		game, errGetGame = localUIGetGame(ui, imGen, llama, &translator)
+		game, errGetGame = localUIGetGame(ui, imGen, llama, &translator, &ttsEngine)
 		if errGetGame != nil {
 			fmt.Printf("%s\n", errGetGame)
 			return
@@ -801,6 +843,15 @@ func main() {
 		}
 	}
 
+	if *pTTSall { //for testing TTS system
+		ui.SetGenerating("Generating all speech files...")
+		errTTS := game.GenerateAllSpeeches()
+		if errTTS != nil {
+			fmt.Printf("ERROR with TTS: %s\n", &errTTS)
+			return
+		}
+	}
+
 	ui.SetGenerating("Starting up, wait....")
 	ui.Render()
 
@@ -809,4 +860,5 @@ func main() {
 		return
 	}
 	fmt.Printf("\n\n\nFAIL %s\n", localUiRunErr)
+
 }
