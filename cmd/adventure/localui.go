@@ -111,7 +111,10 @@ func localUIFlow(ui *GraphicalUI, game AdventureGame, temperature float64, image
 	ui.SetPage(path.Join(game.GetSaveDir(), last.PictureFileName()), last) //menucpicture is the last or menupicture if no latest pic
 	ui.Render()
 
-	snd, _ := ui.PlayAudioFile(path.Join(game.GetSaveDir(), last.TTSTextFileName(game.translator.Lang)))
+	var snd rl.Sound
+	if game.ttsengine != nil {
+		snd, _ = ui.PlayAudioFile(path.Join(game.GetSaveDir(), last.TTSTextFileName(game.translator.Lang)))
+	}
 	for {
 		fmt.Printf("--get user input--\n")
 		userInput, errUser := ui.GetPrompt()

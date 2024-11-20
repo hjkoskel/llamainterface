@@ -122,6 +122,9 @@ func (p *GraphicalUI) PlayAudioFile(fname string) (rl.Sound, time.Duration) {
 	fmt.Printf("\n\nGOING TO PLAY %s\n\n", fname)
 
 	sound := rl.LoadSound(fname) //Bad raylib... no error handling :(
+	if sound.FrameCount == 0 || sound.Stream.SampleRate == 0 {
+		return sound, 0
+	}
 	//defer rl.UnloadSound(sound)
 	// Play sound
 	rl.PlaySound(sound)
