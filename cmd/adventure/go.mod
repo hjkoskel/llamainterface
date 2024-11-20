@@ -1,14 +1,15 @@
 module adventure
 
-go 1.22.5
+go 1.23.2
 
 require (
 	github.com/fatih/color v1.17.0
-	github.com/gen2brain/raylib-go/raylib v0.0.0-20240905170917-123ec7ae6b35
+	github.com/gen2brain/raylib-go/raylib v0.0.0-20241111144450-60446bce159d
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-playground/assert/v2 v2.2.0
 	golang.org/x/image v0.20.0
 	llamainterface v0.0.0
+	tovideo v0.0.0
 )
 
 require (
@@ -44,3 +45,5 @@ require (
 )
 
 replace llamainterface => ../../
+
+replace tovideo => ./tovideo

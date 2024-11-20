@@ -8,6 +8,10 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"tovideo"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 type CalcStatistics struct { //Track performance of gaming system
@@ -319,15 +323,68 @@ func (p *AdventureGame) GetMenuPictureFile() string {
 	return p.gameTitlepictureFilename
 }
 
+func (p *AdventurePage) GenerateSpeech(ttsEngine TTSInterf, translator *Translator, saveDir string) error {
+	txt := p.GetText(translator.Lang)
+	errRun := ttsEngine.Run(txt, path.Join(saveDir, p.TTSTextFileName(translator.Lang)))
+	if errRun != nil {
+		return errRun
+	}
+	if len(p.UserResponse) == 0 {
+		return nil //Not found
+	}
+	txtResp := p.GetUserResponse(translator.Lang)
+	errRun = ttsEngine.Run(txtResp, path.Join(saveDir, p.TTSPromptFileName(translator.Lang)))
+	if errRun != nil {
+		return errRun
+	}
+	return nil
+}
+
+func (p *AdventureGame) GenerateMissingSpeeches() error {
+	for pagenumber, page := range p.Pages {
+
+		fname := path.Join(p.GetSaveDir(), page.TTSPromptFileName(p.translator.Lang))
+
+		snd := rl.LoadSound(fname)
+		if snd.FrameCount == 0 {
+			fmt.Printf("NOT FOUND %s\n", fname)
+			errGen := page.GenerateSpeech(*p.ttsengine, p.translator, p.GetSaveDir())
+			if errGen != nil {
+				return fmt.Errorf("speech gen err %s on page %v/%v", errGen, pagenumber, len(p.Pages))
+			}
+		} else {
+			fmt.Printf("FOUND %s releasing...\n", fname)
+			rl.UnloadSound(snd)
+		}
+		//TODO UNLOAD?
+	}
+	return nil
+}
+
 func (p *AdventureGame) GenerateAllSpeeches() error {
 	for pagenumber, page := range p.Pages {
 		fmt.Printf("Running TTS on page %v/%v\n", pagenumber, len(p.Pages))
-		txt := page.GetText(p.translator.Lang)
-		a := *p.ttsengine
-		errRun := a.Run(txt, path.Join(p.GetSaveDir(), page.TTSTextFileName(p.translator.Lang)))
-		if errRun != nil {
-			return errRun
+		/*
+			txt := page.GetText(p.translator.Lang)
+			a := *p.ttsengine
+			errRun := a.Run(txt, path.Join(p.GetSaveDir(), page.TTSTextFileName(p.translator.Lang)))
+			if errRun != nil {
+				return errRun
+			}
+			if len(page.UserResponse) == 0 {
+				continue //Not found
+			}
+			txtResp := page.GetUserResponse(p.translator.Lang)
+			errRun = a.Run(txtResp, path.Join(p.GetSaveDir(), page.TTSPromptFileName(p.translator.Lang)))
+			if errRun != nil {
+				return errRun
+			}
+		*/
+		errGen := page.GenerateSpeech(*p.ttsengine, p.translator, p.GetSaveDir())
+		if errGen != nil {
+			return fmt.Errorf("speech gen err %s on page %v/%v", errGen, page, len(p.Pages))
 		}
+
 	}
 	return nil
 }
@@ -372,4 +429,66 @@ func (p *AdventureGame) TranslateMissing() error {
 	}
 
 	return nil
+}
+
+func (p *AdventurePage) ExportToVideo(gamedir string, lang LanguageName, outFileName string) error {
+	return tovideo.CreateRoomVideo(
+		path.Join(gamedir, p.PictureFileName()),
+		path.Join(gamedir, p.TTSTextFileName(lang)),
+		path.Join(gamedir, p.TTSPromptFileName(lang)),
+		p.Text,
+		p.UserResponse,
+		outFileName)
+}
+
+// ExportToVideo creates video from saved game .mp4 file
+func (p *AdventureGame) ExportToVideo(outVideoFileName string) error {
+	fmt.Printf("--- Video export---\n")
+	tmpPageVideos, errTmp := tovideo.GetTmpFileNames(len(p.Pages), "mp4")
+	if errTmp != nil {
+		return fmt.Errorf("error generating tmp file names %s", errTmp)
+	}
+
+	tmpVide, errVidTmp := tovideo.GetTmpFileNames(1, "mp4")
+	if errTmp != nil {
+		return fmt.Errorf("error generating tmp video names %s", errVidTmp)
+	}
+
+	tmpList, errList := tovideo.GetTmpFileNames(1, "txt")
+	if errList != nil {
+		return fmt.Errorf("export to video %s", errList)
+	}
+	tovideo.RemoveFileList(tmpPageVideos)
+	tovideo.RemoveFileList(tmpVide)
+	tovideo.RemoveFileList(tmpList)
+
+	savedir := p.GetSaveDir()
+	for i, page := range p.Pages {
+		fmt.Printf("Generate to video %v/%v\n\n", i, len(p.Pages))
+		errExport := page.ExportToVideo(savedir, p.translator.Lang, tmpPageVideos[i])
+		if errExport != nil {
+			return fmt.Errorf("faile on page %v/%v, err:%s", i, len(p.Pages), errExport)
+		}
+	}
+	fmt.Printf("\n\n\nNow joining videos %s\n", strings.Join(tmpPageVideos, ","))
+	errCompleteJoin := tovideo.JoinVideos(tmpPageVideos, tmpList[0], tmpVide[0])
+	if errCompleteJoin != nil {
+		return errCompleteJoin
+	}
+	fmt.Printf("\n*************CREATING CHAPTERS**************\n")
+	chapters, errChapters := tovideo.CreateChaptersFromFiles(tmpPageVideos, "Page")
+	if errChapters != nil {
+		return errChapters
+	}
+
+	fmt.Printf("\n\n\n-----\n%s------\n", chapters.ToText())
+	//return nil
+
+	errSetChapters := chapters.WriteChaptersToVideo(tmpVide[0], outVideoFileName)
+
+	tovideo.RemoveFileList(tmpPageVideos)
+	tovideo.RemoveFileList(tmpVide)
+	tovideo.RemoveFileList(tmpList)
+	return errSetChapters
+
 }

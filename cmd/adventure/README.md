@@ -1,4 +1,7 @@
+
 # Adventure
+![title page of adventure](title.png)
+
 
 This program demonstrates how to create psychedelic adventure experience with generative AI
 
@@ -155,10 +158,10 @@ Game includes experimental support for text to speech.
 Install one of those TTS softwares and required voices etc.. Remember that those might be even available as package for your distro.
 
 
-Option **-ttstype** choose TTS type [piper,flite,bark]
-Option **-ttsex** TTS executable name, not needed if default matches what is found from.
-Option **-ttsmodel** tts model file or model name
-Option **-ttsconffile** tts config file name if model supports it
+- Option **-ttstype** choose TTS type [piper,flite,bark]
+- Option **-ttsex** TTS executable name, not needed if default matches what is found from.
+- Option **-ttsmodel** tts model file or model name
+- Option **-ttsconffile** tts config file name if model supports it
 
 | -ttstype |    -ttsex     |     -ttsmodel       | -ttsconffile |
 |----------|---------------|---------------------|--------------|
@@ -166,10 +169,18 @@ Option **-ttsconffile** tts config file name if model supports it
 |  flite   | default:flite | name of voice (-voice on flite), ignore paramtere if default is ok | not in use yet|
 |  bark    | default:bark  | filename of weights like "bark-small/ggml_weights.bin" |  not in use yet |
 
+# Experimental: Export .mp4 videos from game
+
+It is possible to export saved game. Export functionality requires that computer have **ffmpeg** installed.
+
+Add option **-videoexport videoname.mp4** to command and after that, load old game from local UI. Exported video must have .mp4 suffix. Using TTS and image generation is mandatory. Adventure game will exit when video is done
+ 
+ Check example adventure:
+
+[![Watch the doom video](https://i.ytimg.com/vi/9JjxnjN3CdY/hqdefault.jpg?sqp=-oaymwE2CPYBEIoBSFXyq4qpAygIARUAAIhCGAFwAcABBvABAfgB_gmAAtAFigIMCAAQARhlIGMoUDAP&rs=AOn4CLB0hlV5bL69JAZ9c1cf03-RQkR02g)](https://youtu.be/9JjxnjN3CdY)
 
 ## TODO
 
-- youtube video
 - More games, update prompts
 - support for scrolling pages back on local ui
 - Store seed number of image generation. Allows re-calculation of picture

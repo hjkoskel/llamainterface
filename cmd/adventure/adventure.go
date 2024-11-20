@@ -602,6 +602,9 @@ func main() {
 	pTTSModel := flag.String("ttsmodel", "", "tts model file or model name")
 	pTTSConfigFile := flag.String("ttsconffile", "", "tts config file name if model supports it")
 
+	//Video export
+	pVideoExport := flag.String("videoexport", "", ".mp4 file for video export of loaded game (program makes exit after export)")
+
 	flag.Parse()
 
 	if 0 < len(*pLang) {
@@ -850,6 +853,44 @@ func main() {
 			fmt.Printf("ERROR with TTS: %s\n", &errTTS)
 			return
 		}
+	}
+
+	if 0 < len(*pVideoExport) {
+		ui.SetGenerating("Traslate missing")
+		ui.Render()
+		errTranslateMissing := game.TranslateMissing()
+		if errTranslateMissing != nil {
+			fmt.Printf("Error translating %s\n", errTranslateMissing)
+			return
+		}
+
+		errSpeech := game.GenerateMissingSpeeches()
+		if errSpeech != nil {
+			fmt.Printf("error genrating missing speech %s\n", errSpeech)
+			return
+		}
+		//TODO method to game
+		missingPics := game.ListMissingPictures()
+		fmt.Printf("missing pictures %#v\n", missingPics)
+		doneCounter := 0
+		for pictureFilename, imageprompt := range missingPics {
+			ui.SetGenerating(fmt.Sprintf("Generating missing pictures %v/%v : %s", doneCounter, len(missingPics), pictureFilename))
+			ui.Render()
+			errPrepare := CreatePngIfNotFound(imGen, pictureFilename, imageprompt, "")
+			if errPrepare != nil {
+				fmt.Printf("error generating picture %s\n", errPrepare)
+				return
+			}
+			doneCounter++
+		}
+		//Then lets export as video
+		errExport := game.ExportToVideo(*pVideoExport)
+		if errExport != nil {
+			fmt.Printf("export fail %s\n", errExport)
+			return
+		}
+		fmt.Printf("\nVIDEO EXPORT SUCKsessfull to %s\n", *pVideoExport)
+		return
 	}
 
 	ui.SetGenerating("Starting up, wait....")
